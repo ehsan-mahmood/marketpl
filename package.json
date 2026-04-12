@@ -1,0 +1,7 @@
+{
+  "name": "marketpl",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

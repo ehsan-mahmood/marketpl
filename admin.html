@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store admin — Joss Finds</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link rel="stylesheet" href="style/admin.css">
+</head>
+<body>
+
+<div id="login-screen" class="login-screen">
+  <div class="login-card card">
+    <h1>Admin login</h1>
+    <p class="hint" id="login-hint">Sign in with the vendor phone number (digits only) and password.</p>
+    <label class="small" for="login-phone">Phone</label>
+    <input type="tel" id="login-phone" inputmode="numeric" autocomplete="username" placeholder="e.g. 61412550608" />
+    <label class="small" for="login-pass">Password</label>
+    <input type="password" id="login-pass" autocomplete="current-password" />
+    <button type="button" class="btn btn-primary" id="btn-login" style="width:100%;margin-top:4px">Sign in</button>
+    <p class="msg login-msg" id="login-msg" role="status"></p>
+  </div>
+</div>
+
+<div class="wrap" id="admin-app" style="display:none">
+  <div class="top">
+    <h1>Store admin</h1>
+    <div class="top-actions">
+      <a class="btn btn-ghost" href="shop.html" target="_blank" rel="noopener">Open shop</a>
+      <button type="button" class="btn btn-ghost" id="btn-logout">Log out</button>
+      <button type="button" class="btn btn-primary" id="btn-save-context">Save data/context.json</button>
+      <button type="button" class="btn btn-primary" id="btn-save-products">Save data/products.csv</button>
+    </div>
+  </div>
+  <span class="msg" id="msg" role="status"></span>
+
+  <div class="card account-card" id="account-card">
+    <h2>Password</h2>
+    <p class="hint" style="margin-bottom:12px">Change password by entering the current one and a new password (at least 6 characters).</p>
+    <div class="fgrid fgrid2">
+      <div>
+        <label class="small" for="pw-old">Current password</label>
+        <input type="password" id="pw-old" autocomplete="current-password" />
+      </div>
+      <div>
+        <label class="small" for="pw-new">New password</label>
+        <input type="password" id="pw-new" autocomplete="new-password" />
+      </div>
+      <div style="grid-column: 1 / -1">
+        <label class="small" for="pw-new2">Confirm new password</label>
+        <input type="password" id="pw-new2" autocomplete="new-password" />
+      </div>
+    </div>
+    <button type="button" class="btn btn-primary" id="btn-change-pw">Update password</button>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button type="button" class="tab on" data-panel="p-context">Context</button>
+    <button type="button" class="tab" data-panel="p-products">Products</button>
+    <button type="button" class="tab" data-panel="p-orders">Orders</button>
+  </div>
+
+  <!-- CONTEXT -->
+  <div class="panel on" id="p-context">
+    <div class="card">
+      <h2>General</h2>
+      <div class="fgrid fgrid2">
+        <div>
+          <label class="small" for="c-whatsapp">WhatsApp (digits ok)</label>
+          <input type="text" id="c-whatsapp" autocomplete="off" />
+        </div>
+        <div>
+          <label class="small" for="c-page_title">Page title</label>
+          <input type="text" id="c-page_title" />
+        </div>
+        <div style="grid-column: 1 / -1">
+          <label class="small" for="c-csv_url">CSV URL (path to products file)</label>
+          <input type="text" id="c-csv_url" placeholder="data/products.csv" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Store</h2>
+      <div class="fgrid">
+        <div class="fgrid fgrid2">
+          <div>
+            <label class="small" for="c-store-name_en">Name (EN) — HTML allowed</label>
+            <input type="text" id="c-store-name_en" />
+          </div>
+          <div>
+            <label class="small" for="c-store-name_bn">Name (BN) — HTML allowed</label>
+            <input type="text" id="c-store-name_bn" />
+          </div>
+        </div>
+        <div class="fgrid fgrid2">
+          <div>
+            <label class="small" for="c-store-tagline_en">Tagline (EN)</label>
+            <input type="text" id="c-store-tagline_en" />
+          </div>
+          <div>
+            <label class="small" for="c-store-tagline_bn">Tagline (BN)</label>
+            <input type="text" id="c-store-tagline_bn" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Announce bar</h2>
+      <div class="fgrid">
+        <div>
+          <label class="small" for="c-announce-en">English — HTML allowed</label>
+          <textarea id="c-announce-en" rows="2"></textarea>
+        </div>
+        <div>
+          <label class="small" for="c-announce-bn">Bengali — HTML allowed</label>
+          <textarea id="c-announce-bn" rows="2"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Trust strip</h2>
+      <div id="trust-items"></div>
+      <button type="button" class="btn btn-ghost" id="btn-add-trust" style="margin-top:8px">+ Add trust item</button>
+    </div>
+
+    <div class="card">
+      <h2>Payment badges</h2>
+      <div class="pay-row" id="pay-methods">
+        <label><input type="checkbox" value="bkash" /> bKash</label>
+        <label><input type="checkbox" value="nagad" /> Nagad</label>
+        <label><input type="checkbox" value="cod" /> COD</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Hero</h2>
+      <div class="fgrid">
+        <div class="fgrid fgrid2">
+          <div>
+            <label class="small" for="c-hero-eyebrow_en">Eyebrow (EN)</label>
+            <input type="text" id="c-hero-eyebrow_en" />
+          </div>
+          <div>
+            <label class="small" for="c-hero-eyebrow_bn">Eyebrow (BN)</label>
+            <input type="text" id="c-hero-eyebrow_bn" />
+          </div>
+        </div>
+        <div class="fgrid fgrid2">
+          <div>
+            <label class="small" for="c-hero-h1_en">Heading (EN) — HTML allowed</label>
+            <textarea id="c-hero-h1_en" rows="2"></textarea>
+          </div>
+          <div>
+            <label class="small" for="c-hero-h1_bn">Heading (BN) — HTML allowed</label>
+            <textarea id="c-hero-h1_bn" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="fgrid fgrid2">
+          <div>
+            <label class="small" for="c-hero-p_en">Paragraph (EN)</label>
+            <textarea id="c-hero-p_en" rows="3"></textarea>
+          </div>
+          <div>
+            <label class="small" for="c-hero-p_bn">Paragraph (BN)</label>
+            <textarea id="c-hero-p_bn" rows="3"></textarea>
+          </div>
+        </div>
+        <div class="fgrid fgrid2">
+          <div>
+            <label class="small" for="c-hero-image_url">Hero image URL</label>
+            <input type="text" id="c-hero-image_url" placeholder="https://… or leave empty" />
+          </div>
+          <div>
+            <label class="small" for="c-hero-fallback_emoji">Fallback emoji</label>
+            <input type="text" id="c-hero-fallback_emoji" placeholder="🔥" />
+          </div>
+        </div>
+        <div class="fgrid fgrid2">
+          <div>
+            <div class="lines-hint">Hero trust pills — English (one line per pill)</div>
+            <textarea id="c-hero-trust_en" rows="4" placeholder="Cash on Delivery&#10;24h Dhaka Delivery"></textarea>
+          </div>
+          <div>
+            <div class="lines-hint">Hero trust pills — Bengali (same order, one per line)</div>
+            <textarea id="c-hero-trust_bn" rows="4"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Footer</h2>
+      <div class="fgrid fgrid2">
+        <div>
+          <label class="small" for="c-footer-copy_en">Copy (EN)</label>
+          <input type="text" id="c-footer-copy_en" />
+        </div>
+        <div>
+          <label class="small" for="c-footer-copy_bn">Copy (BN)</label>
+          <input type="text" id="c-footer-copy_bn" />
+        </div>
+        <div>
+          <label class="small" for="c-footer-wa_label_en">WhatsApp label (EN)</label>
+          <input type="text" id="c-footer-wa_label_en" />
+        </div>
+        <div>
+          <label class="small" for="c-footer-wa_label_bn">WhatsApp label (BN)</label>
+          <input type="text" id="c-footer-wa_label_bn" />
+        </div>
+      </div>
+    </div>
+
+    <p class="raw-toggle" id="raw-toggle">Advanced: edit raw JSON ▾</p>
+    <div class="card raw-json" id="raw-json-wrap">
+      <h2>Raw data/context.json</h2>
+      <textarea id="raw-json" spellcheck="false"></textarea>
+      <p class="hint" style="margin-top:8px">Valid JSON only. Saving from the form above overwrites this; use “Save data/context.json” after editing.</p>
+    </div>
+  </div>
+
+  <!-- PRODUCTS -->
+  <div class="panel" id="p-products">
+    <div class="card">
+      <h2>Products (data/products.csv)</h2>
+      <p class="hint" style="margin-bottom:12px">Edit rows below or add/remove products. Put images in <code>assets/</code> and set <code>image_url</code> to e.g. <code>assets/shirt.jpg</code>. Boolean <code>in_stock</code> is TRUE/FALSE. Bundle IDs: comma-separated (e.g. <code>2,16</code>).</p>
+      <div class="prod-toolbar">
+        <button type="button" class="btn btn-ghost" id="btn-add-product">+ Add product</button>
+        <span class="hint" id="prod-count"></span>
+      </div>
+      <div class="table-scroll">
+        <table class="prod" id="prod-table">
+          <thead>
+            <tr>
+              <th class="col-id">id</th>
+              <th>name</th>
+              <th>price</th>
+              <th>original_price</th>
+              <th>category</th>
+              <th>emoji</th>
+              <th>image_url</th>
+              <th>desc</th>
+              <th>rating</th>
+              <th>reviews</th>
+              <th>badge</th>
+              <th>in_stock</th>
+              <th>stock</th>
+              <th>views</th>
+              <th>bundle</th>
+              <th class="col-actions"> </th>
+            </tr>
+          </thead>
+          <tbody id="prod-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ORDERS -->
+  <div class="panel" id="p-orders">
+    <div class="card">
+      <h2>Orders (data/orders.csv)</h2>
+      <p class="hint" style="margin-bottom:12px">One row per checkout. Status starts as <strong>placed</strong> when the customer checks out; use <strong>Next</strong> to move through confirmed → despatched → delivered (delivered removes the order from the file). <strong>Delete</strong> removes every line for that order.</p>
+      <div class="prod-toolbar">
+        <button type="button" class="btn btn-ghost" id="btn-orders-refresh">Refresh</button>
+        <span class="hint" id="orders-count"></span>
+      </div>
+      <div class="table-scroll">
+        <table class="orders" id="orders-table">
+          <thead>
+            <tr>
+              <th class="col-oid">order_id</th>
+              <th>placed_at</th>
+              <th>customer</th>
+              <th>phone</th>
+              <th>items</th>
+              <th class="col-sub">subtotal</th>
+              <th class="col-st">status</th>
+              <th class="col-actions"> </th>
+            </tr>
+          </thead>
+          <tbody id="orders-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div><!-- #admin-app -->
+
+<div id="order-delete-modal" class="modal-overlay" hidden aria-hidden="true">
+  <div class="modal-dialog card" role="dialog" aria-labelledby="order-delete-title" aria-modal="true">
+    <h2 id="order-delete-title">Delete this order?</h2>
+    <p class="modal-body hint" id="order-delete-msg"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="order-delete-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="order-delete-confirm">Delete order</button>
+    </div>
+  </div>
+</div>
+
+<script src="logic/admin.js" defer></script>
+</body>
+</html>
