@@ -1,7 +1,14 @@
 {
   "whatsapp": "+61412550608",
   "page_title": "Joss Finds — জোস ফাইন্ডস",
+  "products_source": "csv",
   "csv_url": "data/products.csv",
+  "orders_source": "csv",
+  "orders_webhook_url": "",
+  "orders_sheet_url": "",
+  "orders_sheet": {
+    "sheet_name": "Sheet1"
+  },
   "store": {
     "name_en": "Joss <em>Finds</em>",
     "name_bn": "জোস <em>ফাইন্ডস</em>",

@@ -3,5 +3,8 @@
   "private": true,
   "scripts": {
     "start": "node server.mjs"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0"
   }
 }

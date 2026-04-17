@@ -30,7 +30,7 @@
       <a class="btn btn-ghost" href="shop.html" target="_blank" rel="noopener">Open shop</a>
       <button type="button" class="btn btn-ghost" id="btn-logout">Log out</button>
       <button type="button" class="btn btn-primary" id="btn-save-context">Save data/context.json</button>
-      <button type="button" class="btn btn-primary" id="btn-save-products">Save data/products.csv</button>
+      <button type="button" class="btn btn-primary" id="btn-save-products">Save products (CSV)</button>
     </div>
   </div>
   <span class="msg" id="msg" role="status"></span>
@@ -74,9 +74,42 @@
           <label class="small" for="c-page_title">Page title</label>
           <input type="text" id="c-page_title" />
         </div>
+        <div>
+          <label class="small" for="c-products_source">Product catalog source</label>
+          <select id="c-products_source">
+            <option value="csv">Local file (data/products.csv)</option>
+            <option value="google_sheets">Google Sheet (published CSV URL)</option>
+          </select>
+        </div>
         <div style="grid-column: 1 / -1">
-          <label class="small" for="c-csv_url">CSV URL (path to products file)</label>
+          <label class="small" for="c-csv_url"><span id="c-csv_url-label">Products CSV path or URL</span></label>
           <input type="text" id="c-csv_url" placeholder="data/products.csv" />
+          <p class="hint" id="c-csv_url-hint" style="margin-top:6px;margin-bottom:0"></p>
+        </div>
+        <div>
+          <label class="small" for="c-orders_source">Orders storage</label>
+          <select id="c-orders_source">
+            <option value="csv">Local file (data/orders.csv)</option>
+            <option value="google_sheets">Google Sheet (API — service account)</option>
+            <option value="google_apps_script">Google Apps Script webhook</option>
+          </select>
+        </div>
+        <div style="grid-column: 1 / -1">
+          <label class="small" for="c-orders_webhook_url">Orders webhook URL (Apps Script)</label>
+          <input type="text" id="c-orders_webhook_url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" />
+          <p class="hint" style="margin-top:6px;margin-bottom:0">Used only when Orders storage is set to Google Apps Script webhook.</p>
+        </div>
+        <div style="grid-column: 1 / -1">
+          <label class="small" for="c-orders_sheet_url">Orders Google Sheet URL</label>
+          <input type="text" id="c-orders_sheet_url" placeholder="https://docs.google.com/spreadsheets/d/…/edit?usp=sharing" autocomplete="off" />
+          <p class="hint" style="margin-top:6px;margin-bottom:0">Paste the normal browser link (edit or share). The server reads the spreadsheet id and <code>gid</code> for the tab when present.</p>
+        </div>
+        <div style="grid-column: 1 / -1">
+          <label class="small" for="c-orders_sheet_name">Orders tab name (optional)</label>
+          <input type="text" id="c-orders_sheet_name" placeholder="Sheet1 — used if URL has no gid" />
+          <p class="hint" id="c-orders_sheet-hint" style="margin-top:6px;margin-bottom:0">
+            For Google orders: put <code>google-service-account.json</code> in the project root (or set <code>MARKETPL_GOOGLE_CREDENTIALS</code>). Enable the Sheets API; share the spreadsheet with the JSON’s <code>client_email</code> as <strong>Editor</strong>. Row 1 should start with <code>order_id</code>.
+          </p>
         </div>
       </div>
     </div>
@@ -225,9 +258,11 @@
   <!-- PRODUCTS -->
   <div class="panel" id="p-products">
     <div class="card">
-      <h2>Products (data/products.csv)</h2>
-      <p class="hint" style="margin-bottom:12px">Edit rows below or add/remove products. Put images in <code>assets/</code> and set <code>image_url</code> to e.g. <code>assets/shirt.jpg</code>. Boolean <code>in_stock</code> is TRUE/FALSE. Bundle IDs: comma-separated (e.g. <code>2,16</code>).</p>
+      <h2 id="prod-panel-title">Products</h2>
+      <p class="hint" id="prod-panel-hint" style="margin-bottom:12px">Edit rows below or add/remove products. Put images in <code>assets/</code> and set <code>image_url</code> to e.g. <code>assets/shirt.jpg</code>. Boolean <code>in_stock</code> is TRUE/FALSE. Bundle IDs: comma-separated (e.g. <code>2,16</code>).</p>
+      <p class="hint" id="products-sheets-notice" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;background:rgba(120,140,200,0.12);border:1px solid rgba(120,140,200,0.35)">Catalog is read from your Google Sheet. Edit the spreadsheet in Google, then use <strong>Refresh</strong> below. Saving to <code>data/products.csv</code> is disabled in this mode.</p>
       <div class="prod-toolbar">
+        <button type="button" class="btn btn-ghost" id="btn-reload-products">Refresh</button>
         <button type="button" class="btn btn-ghost" id="btn-add-product">+ Add product</button>
         <span class="hint" id="prod-count"></span>
       </div>
@@ -262,8 +297,8 @@
   <!-- ORDERS -->
   <div class="panel" id="p-orders">
     <div class="card">
-      <h2>Orders (data/orders.csv)</h2>
-      <p class="hint" style="margin-bottom:12px">One row per checkout. Status starts as <strong>placed</strong> when the customer checks out; use <strong>Next</strong> to move through confirmed → despatched → delivered (delivered removes the order from the file). <strong>Delete</strong> removes every line for that order.</p>
+      <h2 id="orders-heading">Orders</h2>
+      <p id="orders-hint" class="hint" style="margin-bottom:12px"></p>
       <div class="prod-toolbar">
         <button type="button" class="btn btn-ghost" id="btn-orders-refresh">Refresh</button>
         <span class="hint" id="orders-count"></span>

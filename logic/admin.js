@@ -1,5 +1,10 @@
 (function () {
   var CTX = null;
+  /** Mirrors context + last /api/admin/products load: "csv" | "google_sheets" */
+  var productsSource = 'csv';
+  /** "csv" | "google_sheets" | "google_apps_script" — from GET /api/admin/orders */
+  var ordersSource = 'csv';
+  var ordersCanMutate = true;
   var productRows = [];
   var PRODUCT_FIELDS = [
     'id', 'name', 'price', 'original_price', 'category', 'emoji', 'image_url', 'desc',
@@ -113,7 +118,17 @@
     return {
       whatsapp: $('c-whatsapp').value.trim(),
       page_title: $('c-page_title').value,
+      products_source: $('c-products_source').value === 'google_sheets' ? 'google_sheets' : 'csv',
       csv_url: $('c-csv_url').value.trim(),
+      orders_source:
+        $('c-orders_source').value === 'google_sheets'
+          ? 'google_sheets'
+          : ($('c-orders_source').value === 'google_apps_script' ? 'google_apps_script' : 'csv'),
+      orders_webhook_url: $('c-orders_webhook_url').value.trim(),
+      orders_sheet_url: $('c-orders_sheet_url').value.trim(),
+      orders_sheet: {
+        sheet_name: ($('c-orders_sheet_name').value || '').trim() || 'Sheet1'
+      },
       store: {
         name_en: $('c-store-name_en').value,
         name_bn: $('c-store-name_bn').value,
@@ -147,11 +162,54 @@
     };
   }
 
+  function syncCsvUrlFieldHelp() {
+    var mode = $('c-products_source').value;
+    var lab = $('c-csv_url-label');
+    var hint = $('c-csv_url-hint');
+    if (mode === 'google_sheets') {
+      lab.textContent = 'Google Sheet CSV export URL';
+      hint.textContent =
+        'Paste the CSV export URL from Google Sheets (https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=...). Publish or share the sheet so the link returns data.';
+    } else {
+      lab.textContent = 'Products CSV path';
+      hint.textContent = 'Path under the site root, usually data/products.csv (served as a static file).';
+    }
+  }
+
+  function updateProductsPanel() {
+    var sheets = productsSource === 'google_sheets';
+    $('prod-panel-title').textContent = sheets ? 'Products (Google Sheet)' : 'Products (data/products.csv)';
+    $('prod-panel-hint').style.display = sheets ? 'none' : '';
+    $('products-sheets-notice').style.display = sheets ? 'block' : 'none';
+    $('btn-add-product').disabled = sheets;
+    $('btn-save-products').disabled = sheets;
+    $('btn-save-products').title = sheets
+      ? 'Turn off “Google Sheet” in Context → Product catalog source to save CSV on disk.'
+      : 'Write the table to data/products.csv';
+  }
+
   function applyContext(ctx) {
     CTX = ctx;
     $('c-whatsapp').value = ctx.whatsapp != null ? String(ctx.whatsapp) : '';
     $('c-page_title').value = ctx.page_title != null ? String(ctx.page_title) : '';
+    $('c-products_source').value = ctx.products_source === 'google_sheets' ? 'google_sheets' : 'csv';
     $('c-csv_url').value = ctx.csv_url != null ? String(ctx.csv_url) : '';
+    $('c-orders_source').value =
+      ctx.orders_source === 'google_sheets'
+        ? 'google_sheets'
+        : (ctx.orders_source === 'google_apps_script' ? 'google_apps_script' : 'csv');
+    $('c-orders_webhook_url').value =
+      ctx.orders_webhook_url != null ? String(ctx.orders_webhook_url) : '';
+    $('c-orders_sheet_url').value =
+      ctx.orders_sheet_url != null ? String(ctx.orders_sheet_url) : '';
+    var os = ctx.orders_sheet || {};
+    $('c-orders_sheet_name').value =
+      os.sheet_name != null && String(os.sheet_name).trim()
+        ? String(os.sheet_name)
+        : 'Sheet1';
+    syncCsvUrlFieldHelp();
+    productsSource = $('c-products_source').value;
+    updateProductsPanel();
     if (ctx.store) {
       $('c-store-name_en').value = ctx.store.name_en || '';
       $('c-store-name_bn').value = ctx.store.name_bn || '';
@@ -183,7 +241,13 @@
       $('c-footer-wa_label_bn').value = ctx.footer.wa_label_bn || '';
     }
     $('raw-json').value = JSON.stringify(ctx, null, 2);
+    ordersSource = $('c-orders_source').value;
+    updateOrdersChrome();
   }
+
+  $('c-products_source').addEventListener('change', function () {
+    syncCsvUrlFieldHelp();
+  });
 
   function loadContext() {
     return fetch('data/context.json?cb=' + Date.now(), { cache: 'no-store' })
@@ -228,6 +292,7 @@
       .then(function () {
         applyContext(obj);
         showMsg('Saved data/context.json', true);
+        return loadProducts();
       })
       .catch(function (e) {
         if (String(e.message) !== 'Unauthorized') {
@@ -264,6 +329,7 @@
   }
 
   function renderProductTable() {
+    var readOnly = productsSource === 'google_sheets';
     var tb = $('prod-tbody');
     tb.innerHTML = '';
     productRows.forEach(function (row, idx) {
@@ -277,12 +343,14 @@
           var ta = document.createElement('textarea');
           ta.dataset.f = f;
           ta.value = val;
+          ta.readOnly = readOnly;
           td.appendChild(ta);
         } else {
           var inp = document.createElement('input');
           inp.type = 'text';
           inp.dataset.f = f;
           inp.value = val;
+          inp.readOnly = readOnly;
           td.appendChild(inp);
         }
         tr.appendChild(td);
@@ -293,6 +361,7 @@
       del.type = 'button';
       del.className = 'btn-mini';
       del.textContent = 'Remove';
+      del.disabled = readOnly;
       del.addEventListener('click', function () {
         syncRowsFromDom();
         productRows.splice(idx, 1);
@@ -315,12 +384,22 @@
   }
 
   function loadProducts() {
-    return fetch('data/products.csv?cb=' + Date.now(), { cache: 'no-store' })
+    return fetch('/api/admin/products?cb=' + Date.now(), { credentials: 'include', cache: 'no-store' })
       .then(function (r) {
-        if (!r.ok) throw new Error('data/products.csv ' + r.status);
-        return r.text();
+        if (r.status === 401) {
+          showLoginScreen();
+          showMsg('Session expired — sign in again.', false);
+          throw new Error('Unauthorized');
+        }
+        return r.json().then(function (j) {
+          return { ok: r.ok, j: j };
+        });
       })
-      .then(function (text) {
+      .then(function (x) {
+        if (!x.ok || !x.j.ok) throw new Error((x.j && x.j.error) || 'Could not load products');
+        productsSource = x.j.source === 'google_sheets' ? 'google_sheets' : 'csv';
+        updateProductsPanel();
+        var text = x.j.csv != null ? String(x.j.csv) : '';
         var parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
         productRows = (parsed.data || []).map(function (row) {
           var o = {};
@@ -334,6 +413,14 @@
         renderProductTable();
       });
   }
+
+  $('btn-reload-products').addEventListener('click', function () {
+    loadProducts().catch(function (e) {
+      if (String(e.message) !== 'Unauthorized') {
+        showMsg(e && e.message ? e.message : 'Refresh failed', false);
+      }
+    });
+  });
 
   $('btn-add-product').addEventListener('click', function () {
     syncRowsFromDom();
@@ -372,11 +459,18 @@
           throw new Error('Unauthorized');
         }
         return r.json().then(function (j) {
-          if (!r.ok || !j.ok) throw new Error((j && j.error) || r.status);
+          if (!r.ok || !j.ok) {
+            if (j && j.readOnly) {
+              showMsg(j.error || 'Catalog is read-only for Google Sheets mode.', false);
+              return null;
+            }
+            throw new Error((j && j.error) || String(r.status));
+          }
           return j;
         });
       })
-      .then(function () {
+      .then(function (j) {
+        if (!j) return;
         showMsg('Saved data/products.csv', true);
       })
       .catch(function (e) {
@@ -413,6 +507,35 @@
     if (s === 'despatched') return 'Delivered';
     return 'Next';
   }
+
+  function updateOrdersChrome() {
+    var h = $('orders-heading');
+    var hint = $('orders-hint');
+    if (!h || !hint) return;
+    if (ordersSource === 'google_sheets') {
+      h.textContent = 'Orders (Google Sheet)';
+      hint.innerHTML =
+        'One row per line item in your connected sheet. Status starts as <strong>placed</strong> at checkout; use <strong>Confirm</strong> / <strong>Despatch</strong> / <strong>Delivered</strong> (delivered removes the order). <strong>Delete</strong> removes every line for that order.';
+    } else if (ordersSource === 'google_apps_script') {
+      h.textContent = 'Orders (Google Sheet via webhook)';
+      hint.innerHTML =
+        'Orders are loaded from your sheet (published CSV). <strong>Confirm</strong>, <strong>Delivered</strong>, and <strong>Delete</strong> POST to your Apps Script URL (<code>orders_webhook_url</code>). Update and <strong>redeploy</strong> the script after changing <code>doPost</code> (see <code>logic/doPost_g_sheet_func.md</code>).';
+    } else {
+      h.textContent = 'Orders (data/orders.csv)';
+      hint.innerHTML =
+        'One row per line item in <strong>data/orders.csv</strong>. Status starts as <strong>placed</strong> at checkout; use <strong>Confirm</strong> / <strong>Despatch</strong> / <strong>Delivered</strong> (delivered removes the order). <strong>Delete</strong> removes every line for that order.';
+    }
+  }
+
+  function ordersMutateDisabledTitle() {
+    if (ordersSource !== 'google_apps_script') return 'Disabled';
+    return 'Set a valid orders webhook URL in Context (https://script.google.com/macros/.../exec)';
+  }
+
+  $('c-orders_source').addEventListener('change', function () {
+    ordersSource = $('c-orders_source').value;
+    updateOrdersChrome();
+  });
 
   function renderOrdersTable(orders) {
     var tb = $('orders-tbody');
@@ -452,7 +575,8 @@
       btnN.type = 'button';
       btnN.className = 'btn-mini btn-next';
       btnN.textContent = nextOrderActionLabel(o.status);
-      btnN.title = 'Move to next status';
+      btnN.title = ordersCanMutate ? 'Move to next status' : ordersMutateDisabledTitle();
+      btnN.disabled = !ordersCanMutate;
       var oid = o.orderId || '';
       btnN.addEventListener('click', function () {
         ordersAdvance(oid);
@@ -461,7 +585,12 @@
       btnD.type = 'button';
       btnD.className = 'btn-mini btn-del';
       btnD.textContent = 'Delete';
-      btnD.title = 'Remove this order from the CSV';
+      btnD.title = ordersCanMutate
+        ? ordersSource === 'csv'
+          ? 'Remove this order from the CSV'
+          : 'Remove this order from the sheet'
+        : ordersMutateDisabledTitle();
+      btnD.disabled = !ordersCanMutate;
       btnD.addEventListener('click', function () {
         ordersDelete(oid, o.customerName || oid);
       });
@@ -487,6 +616,9 @@
       })
       .then(function (x) {
         if (!x.ok || !x.j.ok) throw new Error((x.j && x.j.error) || 'Load failed');
+        ordersCanMutate = x.j.canMutate !== false;
+        ordersSource = x.j.source != null ? String(x.j.source) : 'csv';
+        updateOrdersChrome();
         renderOrdersTable(x.j.orders || []);
       });
   }
@@ -505,19 +637,20 @@
           throw new Error('Unauthorized');
         }
         return r.json().then(function (j) {
-          return { ok: r.ok, j: j };
+          return { httpOk: r.ok, j: j };
         });
       })
-      .then(function (x) {
-        if (!x.ok || !x.j.ok) throw new Error((x.j && x.j.error) || 'Advance failed');
-        var ns = x.j.newStatus;
-        showMsg(ns === 'delivered' ? 'Order marked delivered and removed from CSV.' : 'Order status updated.', true);
-        return loadOrders();
+      .then(function (result) {
+        var success = !!(result && result.httpOk && result.j && result.j.ok);
+        return loadOrders()
+          .catch(function () {})
+          .then(function () {
+            if (success) showMsg('Orders updated.', true);
+          });
       })
       .catch(function (e) {
-        if (String(e.message) !== 'Unauthorized') {
-          showMsg(e && e.message ? e.message : 'Advance failed', false);
-        }
+        if (String(e.message) === 'Unauthorized') return;
+        return loadOrders().catch(function () {});
       });
   }
 
@@ -532,7 +665,9 @@
       (label || orderId) +
       '” (' +
       orderId +
-      ')? Every line for this order will be removed from data/orders.csv. This cannot be undone.';
+      ')? Every line for this order will be removed from ' +
+      (ordersSource === 'csv' ? 'data/orders.csv' : 'the sheet') +
+      '. This cannot be undone.';
     el.removeAttribute('hidden');
     el.setAttribute('aria-hidden', 'false');
     $('order-delete-confirm').focus();
@@ -566,18 +701,20 @@
           throw new Error('Unauthorized');
         }
         return r.json().then(function (j) {
-          return { ok: r.ok, j: j };
+          return { httpOk: r.ok, j: j };
         });
       })
-      .then(function (x) {
-        if (!x.ok || !x.j.ok) throw new Error((x.j && x.j.error) || 'Delete failed');
-        showMsg('Order deleted.', true);
-        return loadOrders();
+      .then(function (result) {
+        var success = !!(result && result.httpOk && result.j && result.j.ok);
+        return loadOrders()
+          .catch(function () {})
+          .then(function () {
+            if (success) showMsg('Orders updated.', true);
+          });
       })
       .catch(function (e) {
-        if (String(e.message) !== 'Unauthorized') {
-          showMsg(e && e.message ? e.message : 'Delete failed', false);
-        }
+        if (String(e.message) === 'Unauthorized') return;
+        return loadOrders().catch(function () {});
       });
   }
 

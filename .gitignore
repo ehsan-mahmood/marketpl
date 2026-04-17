@@ -1,2 +1,6 @@
 admin-auth.json
 data/orders.csv
+google-service-account.json
+.env
+node_modules
+bakup

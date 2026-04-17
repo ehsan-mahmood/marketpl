@@ -1,14 +1,16 @@
 /**
- * Serves the static shop + admin UI. Data: data/context.json, products.csv, orders.csv (line-item ledger + status).
+ * Serves the static shop + admin UI. Data: data/context.json, products (local CSV or published Sheet URL), orders (local CSV or Google Sheet via API + service account).
  * Product images: assets/. Admin: admin-auth.json in project root.
  */
 import http from 'http';
+import https from 'https';
 import fs from 'fs';
 import { promises as fsp } from 'fs';
 import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { google } from 'googleapis';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8787;
@@ -81,7 +83,40 @@ function verifyPassword(plain, auth) {
   }
 }
 
+/**
+ * Render / cloud deploy: set these env vars so auth survives redeploys.
+ *   ADMIN_PHONE           — vendor phone digits
+ *   ADMIN_PASSWORD_HASH   — hex hash (from a previous first-run console output)
+ *   ADMIN_SALT            — hex salt  (paired with ADMIN_PASSWORD_HASH)
+ *   ADMIN_SESSION_SECRET  — 64-char hex string
+ *   ADMIN_DEV_KEY         — dev reset key (also accepted by devKeyValid)
+ *
+ * If none are set, falls back to reading/creating admin-auth.json as before (local dev).
+ * If env vars ARE set, admin-auth.json is ignored for reads; saveAuth() writes to the file
+ * for change-password (persists until next redeploy, then env vars take over again).
+ */
+function loadAuthFromEnv() {
+  const phone = process.env.ADMIN_PHONE;
+  const hash  = process.env.ADMIN_PASSWORD_HASH;
+  const salt  = process.env.ADMIN_SALT;
+  const secret = process.env.ADMIN_SESSION_SECRET;
+  if (phone && hash && salt && secret) {
+    return {
+      phoneDigits:    String(phone).replace(/\D/g, ''),
+      passwordHash:   String(hash),
+      salt:           String(salt),
+      sessionSecret:  String(secret),
+      devResetKey:    process.env.ADMIN_DEV_KEY || ''
+    };
+  }
+  return null;
+}
+
 function ensureAuthFile() {
+  // If env vars are configured (Render / cloud), use them — no file needed.
+  const fromEnv = loadAuthFromEnv();
+  if (fromEnv) return fromEnv;
+
   if (fs.existsSync(AUTH_PATH)) {
     return JSON.parse(fs.readFileSync(AUTH_PATH, 'utf8'));
   }
@@ -106,6 +141,13 @@ function ensureAuthFile() {
   console.log('  Phone:    ' + (phoneDigits ? phoneDigits + ' (from data/context.json whatsapp)' : '(empty — use dev-reset to set)'));
   console.log('  Password: changeme   ← change after first login');
   console.log('  Dev key:  ' + devResetKey + '   (or set ADMIN_DEV_KEY env)');
+  console.log('\n── For Render / cloud deploys (so auth survives redeploys) ──');
+  console.log('  Set these env vars in your Render dashboard → Environment:');
+  console.log('  ADMIN_PHONE          = ' + (phoneDigits || 'your-phone-digits'));
+  console.log('  ADMIN_PASSWORD_HASH  = ' + passwordHash);
+  console.log('  ADMIN_SALT           = ' + salt);
+  console.log('  ADMIN_SESSION_SECRET = ' + sessionSecret);
+  console.log('  ADMIN_DEV_KEY        = ' + devResetKey);
   console.log('──────────────────────────────────────────────────────\n');
   return data;
 }
@@ -115,6 +157,8 @@ function loadAuth() {
 }
 
 function saveAuth(auth) {
+  // Always write to file (for change-password during a running session).
+  // On next redeploy, env vars will take over again if set.
   fs.writeFileSync(AUTH_PATH, JSON.stringify(auth, null, 2) + '\n', 'utf8');
 }
 
@@ -288,6 +332,107 @@ function requireAdmin(req, res) {
   return sess;
 }
 
+function readContextJson() {
+  try {
+    if (!fs.existsSync(CONTEXT_PATH)) return {};
+    return JSON.parse(fs.readFileSync(CONTEXT_PATH, 'utf8'));
+  } catch (_) {
+    return {};
+  }
+}
+
+/** @returns {'csv' | 'google_sheets'} */
+function productsSourceMode(ctx) {
+  return ctx && ctx.products_source === 'google_sheets' ? 'google_sheets' : 'csv';
+}
+
+/** Limit remote fetches to Google Sheet/Drive CSV export hosts (SSRF mitigation). */
+function isAllowedGoogleSheetCsvUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    return h === 'docs.google.com' || h === 'drive.google.com';
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Fetch published CSV from Google (redirects, e.g. to googleusercontent.com, are followed).
+ * Uses https only — matches isAllowedGoogleSheetCsvUrl entry URLs.
+ */
+function fetchHttpsCsvText(urlStr, maxRedirects) {
+  const max = maxRedirects != null ? maxRedirects : 8;
+  return new Promise(function (resolve, reject) {
+    function one(url, left) {
+      let u;
+      try {
+        u = new URL(url);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      if (u.protocol !== 'https:') {
+        reject(new Error('Only https URLs are allowed'));
+        return;
+      }
+      const req = https.request(
+        u,
+        {
+          method: 'GET',
+          timeout: 45000,
+          headers: { 'User-Agent': 'marketpl-server/1' }
+        },
+        function (res) {
+          const code = res.statusCode || 0;
+          if (code >= 300 && code < 400 && res.headers.location && left > 0) {
+            const next = new URL(res.headers.location, url).href;
+            res.resume();
+            return one(next, left - 1);
+          }
+          if (code !== 200) {
+            reject(new Error('HTTP ' + code));
+            res.resume();
+            return;
+          }
+          const chunks = [];
+          res.on('data', function (c) {
+            chunks.push(c);
+          });
+          res.on('end', function () {
+            resolve(Buffer.concat(chunks).toString('utf8'));
+          });
+        }
+      );
+      req.on('error', reject);
+      req.on('timeout', function () {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+      req.end();
+    }
+    one(urlStr, max);
+  });
+}
+
+async function getProductsCsvForContext(ctx) {
+  const mode = productsSourceMode(ctx);
+  if (mode === 'google_sheets') {
+    const url = String(ctx.csv_url || '').trim();
+    if (!isAllowedGoogleSheetCsvUrl(url)) {
+      const err = new Error(
+        'Set csv_url to a Google Sheet CSV export URL (https://docs.google.com/.../export?format=csv&gid=…).'
+      );
+      err.code = 'BAD_URL';
+      throw err;
+    }
+    return await fetchHttpsCsvText(url);
+  }
+  if (!fs.existsSync(PRODUCTS_PATH)) return '';
+  return fs.readFileSync(PRODUCTS_PATH, 'utf8');
+}
+
 function csvEscapeCell(val) {
   const s = val == null ? '' : String(val);
   if (/[\r\n",]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
@@ -345,6 +490,401 @@ const ORDERS_CSV_HEADER =
   'order_id,placed_at,customer_name,customer_phone,address,city,area,note,payment_method,order_subtotal,product_id,product_name,qty,unit_price,line_total,status';
 const ORDER_COLUMNS = ORDERS_CSV_HEADER.split(',');
 
+/** Map Sheet headers (truncated / aliases) to canonical column names. */
+function canonicalOrderSheetHeader(h) {
+  const t = String(h || '').trim();
+  if (!t) return '';
+  const aliases = {
+    customer_nam: 'customer_name',
+    customer_phon: 'customer_phone',
+    payment_meth: 'payment_method'
+  };
+  const norm = t.replace(/\s+/g, '_').toLowerCase();
+  if (aliases[norm]) return aliases[norm];
+  if (ORDER_COLUMNS.indexOf(t) !== -1) return t;
+  const byLower = ORDER_COLUMNS.find(function (c) {
+    return c.toLowerCase() === norm;
+  });
+  return byLower || t;
+}
+
+/** @returns {'csv' | 'google_sheets' | 'google_apps_script'} */
+function ordersSourceMode(ctx) {
+  if (ctx && ctx.orders_source === 'google_sheets') return 'google_sheets';
+  if (ctx && ctx.orders_source === 'google_apps_script') return 'google_apps_script';
+  return 'csv';
+}
+
+function getOrdersWebhookUrl(ctx) {
+  return ctx && ctx.orders_webhook_url != null ? String(ctx.orders_webhook_url).trim() : '';
+}
+
+/**
+ * True only for a deployed Apps Script web app URL (POST hits doPost).
+ * Do not use a spreadsheet “edit” or docs URL — those return HTML / 405 on POST.
+ */
+function isAppsScriptExecUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    const path = u.pathname || '';
+    if (h === 'script.google.com') {
+      return /^\/macros\/s\/[^/]+\/exec\/?$/i.test(path.replace(/\/+$/, '') || '/');
+    }
+    if (h === 'script.googleusercontent.com') {
+      return /\/macros\//i.test(path);
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+function isAllowedAppsScriptWebhookUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    return u.protocol === 'https:' && u.hostname.toLowerCase() === 'script.google.com' && isAppsScriptExecUrl(urlStr);
+  } catch (_) {
+    return false;
+  }
+}
+
+function parseAppsScriptWebhookResponse(text) {
+  const t = String(text || '').trim();
+  if (!t) throw new Error('Empty webhook response');
+  let j;
+  try {
+    j = JSON.parse(t);
+  } catch (_) {
+    throw new Error('Webhook returned non-JSON: ' + t.slice(0, 200));
+  }
+  if (!j.ok) throw new Error(j.error || 'Webhook error');
+  return j;
+}
+
+async function postOrdersWebhook(payload) {
+  const ctx = readContextJson();
+  const url = getOrdersWebhookUrl(ctx);
+  if (!isAllowedAppsScriptWebhookUrl(url)) {
+    throw new Error(
+      'orders_webhook_url must be set to https://script.google.com/macros/s/.../exec in data/context.json'
+    );
+  }
+  const text = await postJsonHttps(url, payload);
+  return parseAppsScriptWebhookResponse(text);
+}
+
+/** Admin can change order status when CSV, Sheets API, or Apps Script webhook (same URL as checkout). */
+function ordersAdminCanMutate(ctx) {
+  const src = ordersSourceMode(ctx);
+  if (src === 'google_apps_script') {
+    return isAllowedAppsScriptWebhookUrl(getOrdersWebhookUrl(ctx));
+  }
+  return true;
+}
+
+/**
+ * Only follow redirects to Apps Script web app URLs. Broad *.google.com was wrong: a 302 to
+ * docs.google.com / www.google.com yields HTML and HTTP 405 on POST.
+ */
+function isAllowedAppsScriptRedirectUrl(urlStr) {
+  return isAppsScriptExecUrl(urlStr);
+}
+
+/**
+ * POST JSON to an HTTPS URL. Follows 301/302/303/307/308 to the same POST body (Apps Script pattern).
+ * @param {number} [redirectsLeft]
+ */
+function postJsonHttps(urlStr, payload, redirectsLeft) {
+  const maxRedirects = redirectsLeft != null ? redirectsLeft : 8;
+  return new Promise(function (resolve, reject) {
+    if (maxRedirects < 0) {
+      reject(new Error('Webhook: too many redirects'));
+      return;
+    }
+    let u;
+    try {
+      u = new URL(urlStr);
+    } catch (e) {
+      reject(e);
+      return;
+    }
+    if (u.protocol !== 'https:') {
+      reject(new Error('Webhook URL must use HTTPS'));
+      return;
+    }
+    const body = JSON.stringify(payload);
+    const req = https.request(
+      u,
+      {
+        method: 'POST',
+        timeout: 45000,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body),
+          'User-Agent': 'marketpl-server/1'
+        }
+      },
+      function (res) {
+        const chunks = [];
+        res.on('data', function (c) {
+          chunks.push(c);
+        });
+        res.on('end', function () {
+          const text = Buffer.concat(chunks).toString('utf8');
+          const code = res.statusCode || 0;
+          const loc = res.headers.location;
+          if (code >= 300 && code < 400 && loc) {
+            let nextUrl;
+            try {
+              nextUrl = new URL(loc, u).href;
+            } catch (e) {
+              reject(new Error('Webhook redirect Location invalid'));
+              return;
+            }
+            if (!isAllowedAppsScriptRedirectUrl(nextUrl)) {
+              reject(
+                new Error(
+                  'Webhook redirect is not an Apps Script web app URL (only follow /macros/.../exec). Got: ' +
+                    String(nextUrl).slice(0, 200)
+                )
+              );
+              return;
+            }
+            postJsonHttps(nextUrl, payload, maxRedirects - 1).then(resolve).catch(reject);
+            return;
+          }
+          if (code < 200 || code >= 300) {
+            reject(new Error('Webhook HTTP ' + code + (text ? ': ' + text.slice(0, 300) : '')));
+            return;
+          }
+          resolve(text);
+        });
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', function () {
+      req.destroy();
+      reject(new Error('Webhook request timeout'));
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Parse a Google Sheets edit, sharing, or export URL for spreadsheet id and optional gid.
+ */
+function parseGoogleSpreadsheetUrl(urlStr) {
+  const s = String(urlStr || '').trim();
+  if (!s) return null;
+  const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!m) return null;
+  const spreadsheetId = m[1];
+  let gid;
+  const g = s.match(/[#&?]gid=(\d+)/);
+  if (g) gid = parseInt(g[1], 10);
+  return { spreadsheetId, gid };
+}
+
+/**
+ * Resolve spreadsheet + tab for Google orders. Prefer orders_sheet_url (like csv_url for products);
+ * fall back to orders_sheet.spreadsheet_id for older configs.
+ */
+async function resolveOrdersSheetConfig(ctx) {
+  const o = ctx && ctx.orders_sheet ? ctx.orders_sheet : {};
+  const urlRaw = ctx && ctx.orders_sheet_url != null ? String(ctx.orders_sheet_url).trim() : '';
+  const parsed = urlRaw ? parseGoogleSpreadsheetUrl(urlRaw) : null;
+  let spreadsheetId = '';
+  if (parsed && parsed.spreadsheetId) spreadsheetId = parsed.spreadsheetId;
+  if (!spreadsheetId && o.spreadsheet_id != null) {
+    spreadsheetId = String(o.spreadsheet_id).trim();
+  }
+  if (!spreadsheetId) return null;
+  let sheetName =
+    o.sheet_name != null && String(o.sheet_name).trim()
+      ? String(o.sheet_name).trim()
+      : 'Sheet1';
+  if (parsed && parsed.gid != null && Number.isFinite(parsed.gid)) {
+    try {
+      const sheets = getSheetsClient();
+      const meta = await sheets.spreadsheets.get({ spreadsheetId });
+      const match = (meta.data.sheets || []).find(function (s) {
+        return s.properties && s.properties.sheetId === parsed.gid;
+      });
+      if (match && match.properties && match.properties.title) {
+        sheetName = match.properties.title;
+      }
+    } catch (_) {
+      /* keep sheetName fallback */
+    }
+  }
+  return { spreadsheetId, sheetName };
+}
+
+function googleCredentialsPath() {
+  const fromEnv = process.env.MARKETPL_GOOGLE_CREDENTIALS;
+  if (fromEnv && String(fromEnv).trim()) return String(fromEnv).trim();
+  return path.join(__dirname, 'google-service-account.json');
+}
+
+function quoteSheetNameForRange(name) {
+  const n = String(name || 'Sheet1');
+  if (/^[A-Za-z0-9_]+$/.test(n)) return n;
+  return "'" + n.replace(/'/g, "''") + "'";
+}
+
+let sheetsApiSingleton = null;
+function getSheetsClient() {
+  if (!sheetsApiSingleton) {
+    const credPath = googleCredentialsPath();
+    if (!fs.existsSync(credPath)) {
+      throw new Error(
+        'Google Sheets orders: missing credentials. Add google-service-account.json (service account JSON) in the project root, or set MARKETPL_GOOGLE_CREDENTIALS to the file path. Share the orders spreadsheet with the service account client_email as Editor.'
+      );
+    }
+    const auth = new google.auth.GoogleAuth({
+      keyFile: credPath,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+    sheetsApiSingleton = google.sheets({ version: 'v4', auth });
+  }
+  return sheetsApiSingleton;
+}
+
+async function readOrderRowsFromSheets(cfg) {
+  const sheets = getSheetsClient();
+  const range = `${quoteSheetNameForRange(cfg.sheetName)}!A:Q`;
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: cfg.spreadsheetId,
+    range
+  });
+  const values = res.data.values;
+  if (!values || values.length < 2) return [];
+  const header = (values[0] || []).map(function (h) {
+    return String(h || '').trim();
+  });
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const fields = values[i] || [];
+    const obj = {};
+    header.forEach(function (h, idx) {
+      if (!h) return;
+      const key = canonicalOrderSheetHeader(h);
+      if (!key || ORDER_COLUMNS.indexOf(key) === -1) return;
+      obj[key] = fields[idx] != null ? String(fields[idx]) : '';
+    });
+    ORDER_COLUMNS.forEach(function (col) {
+      if (obj[col] === undefined) obj[col] = '';
+    });
+    if (!obj.status || !String(obj.status).trim()) obj.status = 'placed';
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function buildOrdersPublicCsvUrl(ctx) {
+  const raw = ctx && ctx.orders_sheet_url != null ? String(ctx.orders_sheet_url).trim() : '';
+  if (!raw) return '';
+  if (!isAllowedGoogleSheetCsvUrl(raw)) return '';
+  if (/[?&]format=csv(?:&|$)/i.test(raw)) return raw;
+  const parsed = parseGoogleSpreadsheetUrl(raw);
+  if (!parsed || !parsed.spreadsheetId) return '';
+  let out = `https://docs.google.com/spreadsheets/d/${parsed.spreadsheetId}/export?format=csv`;
+  if (parsed.gid != null && Number.isFinite(parsed.gid)) out += `&gid=${parsed.gid}`;
+  return out;
+}
+
+async function readOrderRowsFromPublicCsv(url) {
+  const text = await fetchHttpsCsvText(url);
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .filter(function (l) {
+      return l.length > 0;
+    });
+  if (lines.length < 2) return [];
+  const header = parseCsvLine(lines[0]).map(canonicalOrderSheetHeader);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    let fields = parseCsvLine(lines[i]);
+    while (fields.length < header.length) fields.push('');
+    if (fields.length > header.length) fields = fields.slice(0, header.length);
+    const obj = {};
+    header.forEach(function (h, idx) {
+      if (!h || ORDER_COLUMNS.indexOf(h) === -1) return;
+      obj[h] = fields[idx] != null ? String(fields[idx]) : '';
+    });
+    ORDER_COLUMNS.forEach(function (col) {
+      if (obj[col] === undefined) obj[col] = '';
+    });
+    if (!obj.status || !String(obj.status).trim()) obj.status = 'placed';
+    rows.push(obj);
+  }
+  return rows;
+}
+
+async function writeOrderRowsToSheets(cfg, rows) {
+  const sheets = getSheetsClient();
+  const q = quoteSheetNameForRange(cfg.sheetName);
+  const clearRange = `${q}!A1:Z50000`;
+  const matrix = [
+    ORDER_COLUMNS.slice(),
+    ...rows.map(function (r) {
+      return ORDER_COLUMNS.map(function (col) {
+        return r[col] != null ? String(r[col]) : '';
+      });
+    })
+  ];
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: cfg.spreadsheetId,
+    range: clearRange
+  });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: cfg.spreadsheetId,
+    range: `${q}!A1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: matrix }
+  });
+}
+
+async function appendOrderRowsToSheets(cfg, csvLines) {
+  const sheets = getSheetsClient();
+  const q = quoteSheetNameForRange(cfg.sheetName);
+  const headRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: cfg.spreadsheetId,
+    range: `${q}!A1:A1`
+  });
+  const values = [];
+  const hasAny =
+    headRes.data.values &&
+    headRes.data.values.length &&
+    String(headRes.data.values[0][0] || '').trim() !== '';
+  if (!hasAny) {
+    values.push(ORDER_COLUMNS.slice());
+  } else {
+    const head0 = String(headRes.data.values[0][0] || '').trim().toLowerCase();
+    if (head0 !== 'order_id') {
+      throw new Error(
+        'Orders sheet cell A1 must be the header order_id, or leave the sheet empty so the server can add headers.'
+      );
+    }
+  }
+  for (let i = 0; i < csvLines.length; i++) {
+    const fields = parseCsvLine(csvLines[i]);
+    const pad = fields.slice();
+    while (pad.length < ORDER_COLUMNS.length) pad.push('');
+    values.push(pad.slice(0, ORDER_COLUMNS.length));
+  }
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: cfg.spreadsheetId,
+    range: `${q}!A:Q`,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values }
+  });
+}
+
 /** If orders.csv predates the `status` column, rewrite once with `placed` on each row. */
 function ensureOrdersFileSchemaSync() {
   ensureDataDirs();
@@ -374,7 +914,7 @@ function ensureOrdersFileSchemaSync() {
   fs.writeFileSync(ORDERS_PATH, outLines.join('\n') + '\n', 'utf8');
 }
 
-function readAllOrderRows() {
+function syncReadAllOrderRowsFromFile() {
   ensureDataDirs();
   ensureOrdersFileSchemaSync();
   if (!fs.existsSync(ORDERS_PATH) || fs.statSync(ORDERS_PATH).size === 0) return [];
@@ -399,7 +939,44 @@ function readAllOrderRows() {
   return rows;
 }
 
+async function readAllOrderRowsAsync() {
+  const ctx = readContextJson();
+  const mode = ordersSourceMode(ctx);
+  if (mode === 'google_apps_script') {
+    const csvUrl = buildOrdersPublicCsvUrl(ctx);
+    if (!csvUrl) {
+      throw new Error(
+        'orders_source is google_apps_script but orders_sheet_url is missing/invalid. Use a Google Sheets edit/share/export URL.'
+      );
+    }
+    return await readOrderRowsFromPublicCsv(csvUrl);
+  }
+  if (mode === 'google_sheets') {
+    const cfg = await resolveOrdersSheetConfig(ctx);
+    if (!cfg) {
+      throw new Error(
+        'orders_source is google_sheets but orders_sheet_url (or orders_sheet.spreadsheet_id) is missing in data/context.json'
+      );
+    }
+    return await readOrderRowsFromSheets(cfg);
+  }
+  return syncReadAllOrderRowsFromFile();
+}
+
 async function writeAllOrderRows(rows) {
+  const ctx = readContextJson();
+  const mode = ordersSourceMode(ctx);
+  if (mode === 'google_sheets') {
+    const cfg = await resolveOrdersSheetConfig(ctx);
+    if (!cfg) throw new Error('orders_sheet config missing');
+    await writeOrderRowsToSheets(cfg, rows);
+    return;
+  }
+  if (mode === 'google_apps_script') {
+    throw new Error(
+      'Full sheet rewrite is not used in google_apps_script mode; use advance/delete via webhook instead.'
+    );
+  }
   ensureDataDirs();
   const header = ORDER_COLUMNS;
   const lines = [header.map(csvEscapeCell).join(',')];
@@ -573,7 +1150,7 @@ function aggregateOrdersForApi(rows) {
 async function advanceOrderById(orderIdRaw) {
   const orderId = String(orderIdRaw || '').trim();
   if (!orderId) throw new Error('orderId required');
-  const rows = readAllOrderRows();
+  const rows = await readAllOrderRowsAsync();
   const eff = effectiveOrderIds(rows);
   if (eff.indexOf(orderId) === -1) throw new Error('Order not found');
   const anchor = rows.find(function (r, i) {
@@ -584,6 +1161,11 @@ async function advanceOrderById(orderIdRaw) {
   });
   const next = computeNextOrderStatus(statSource.status);
   if (next === null) throw new Error('No next status for this order');
+  const ctx = readContextJson();
+  if (ordersSourceMode(ctx) === 'google_apps_script') {
+    await postOrdersWebhook({ action: 'advance', orderId: orderId, newStatus: next });
+    return { newStatus: next };
+  }
   let out;
   if (next === 'delivered') {
     out = rows.filter(function (r, i) {
@@ -602,17 +1184,33 @@ async function advanceOrderById(orderIdRaw) {
 async function deleteOrderById(orderIdRaw) {
   const orderId = String(orderIdRaw || '').trim();
   if (!orderId) throw new Error('orderId required');
-  const rows = readAllOrderRows();
+  const rows = await readAllOrderRowsAsync();
   const eff = effectiveOrderIds(rows);
   const before = rows.length;
   const out = rows.filter(function (r, i) {
     return eff[i] !== orderId;
   });
   if (out.length === before) throw new Error('Order not found');
+  const ctx = readContextJson();
+  if (ordersSourceMode(ctx) === 'google_apps_script') {
+    await postOrdersWebhook({ action: 'delete', orderId: orderId });
+    return;
+  }
   await writeAllOrderRows(out);
 }
 
-function appendOrderLedger(csvLines) {
+async function appendOrderLedger(csvLines) {
+  const ctx = readContextJson();
+  const mode = ordersSourceMode(ctx);
+  if (mode === 'google_sheets') {
+    const cfg = await resolveOrdersSheetConfig(ctx);
+    if (!cfg) throw new Error('orders_sheet config missing');
+    await appendOrderRowsToSheets(cfg, csvLines);
+    return;
+  }
+  if (mode === 'google_apps_script') {
+    return;
+  }
   ensureDataDirs();
   ensureOrdersFileSchemaSync();
   const needHeader = !fs.existsSync(ORDERS_PATH) || fs.statSync(ORDERS_PATH).size === 0;
@@ -766,6 +1364,7 @@ const server = http.createServer(async (req, res) => {
       const subStr = Number.isFinite(subNum) ? String(subNum) : '';
 
       const csvRows = [];
+      const cleanLines = [];
       for (let i = 0; i < lines.length; i++) {
         const L = lines[i] || {};
         const pid = clampInput(L.productId != null ? L.productId : L.product_id, 24);
@@ -795,8 +1394,31 @@ const server = http.createServer(async (req, res) => {
           'placed'
         ];
         csvRows.push(row.map(csvEscapeCell).join(','));
+        cleanLines.push({
+          productId: pid,
+          productName: pname,
+          qty: String(Math.floor(qty)),
+          unitPrice: String(up),
+          lineTotal: String(lt)
+        });
       }
-      appendOrderLedger(csvRows);
+      const ctx = readContextJson();
+      if (ordersSourceMode(ctx) === 'google_apps_script') {
+        await postOrdersWebhook({
+          orderId: orderId,
+          placedAt: placedAt,
+          customerName: cname,
+          customerPhone: cphone,
+          address: addr,
+          city: city,
+          area: area,
+          note: note,
+          payment: payment,
+          orderSubtotal: subStr,
+          lines: cleanLines
+        });
+      }
+      await appendOrderLedger(csvRows);
       return json(res, 200, { ok: true });
     } catch (e) {
       return json(res, 400, { ok: false, error: String(e && e.message ? e.message : e) });
@@ -807,9 +1429,16 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && pathname === '/api/admin/orders') {
     if (!requireAdmin(req, res)) return;
     try {
-      const rows = readAllOrderRows();
+      const ctx = readContextJson();
+      const source = ordersSourceMode(ctx);
+      const rows = await readAllOrderRowsAsync();
       const orders = aggregateOrdersForApi(rows);
-      return json(res, 200, { ok: true, orders });
+      return json(res, 200, {
+        ok: true,
+        orders,
+        source,
+        canMutate: ordersAdminCanMutate(ctx)
+      });
     } catch (e) {
       return json(res, 500, { ok: false, error: String(e && e.message ? e.message : e) });
     }
@@ -841,6 +1470,24 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* ── Products catalog (admin — local file or Google Sheet CSV per context) ── */
+  if (req.method === 'GET' && pathname === '/api/admin/products') {
+    if (!requireAdmin(req, res)) return;
+    (async () => {
+      try {
+        const ctx = readContextJson();
+        const source = productsSourceMode(ctx);
+        const csv = await getProductsCsvForContext(ctx);
+        return json(res, 200, { ok: true, source, csv });
+      } catch (e) {
+        const code = e && e.code;
+        const status = code === 'BAD_URL' ? 400 : 500;
+        return json(res, status, { ok: false, error: String(e && e.message ? e.message : e) });
+      }
+    })();
+    return;
+  }
+
   /* ── Protected saves ── */
   if (req.method === 'POST' && pathname === '/api/save-context') {
     if (!requireAdmin(req, res)) return;
@@ -857,6 +1504,15 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && pathname === '/api/save-products') {
     if (!requireAdmin(req, res)) return;
     try {
+      const ctx = readContextJson();
+      if (productsSourceMode(ctx) === 'google_sheets') {
+        return json(res, 400, {
+          ok: false,
+          readOnly: true,
+          error:
+            'Product catalog is loaded from Google Sheets. Edit the spreadsheet there, then reload this page.'
+        });
+      }
       const raw = await readBody(req);
       let csvText;
       const ct = (req.headers['content-type'] || '').toLowerCase();
@@ -915,16 +1571,27 @@ ensureDataDirs();
 loadAuth();
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`This PC:  http://127.0.0.1:${PORT}/shop.html`);
-  console.log(`Admin:      http://127.0.0.1:${PORT}/admin.html`);
-  const ips = ipv4LANAddresses();
-  if (ips.length) {
-    console.log('Same Wi‑Fi / LAN (use from phones & other PCs):');
-    ips.forEach(function (ip) {
-      console.log(`  http://${ip}:${PORT}/shop.html  |  admin: http://${ip}:${PORT}/admin.html`);
-    });
+  const isCloud = process.env.RENDER || process.env.RAILWAY || process.env.FLY_APP_NAME;
+  if (isCloud) {
+    console.log(`Server running on port ${PORT}`);
+    console.log('Shop:  /shop.html   Admin: /admin.html');
   } else {
-    console.log('(No non-local IPv4 found — check Wi‑Fi/Ethernet.)');
+    console.log(`This PC:  http://127.0.0.1:${PORT}/shop.html`);
+    console.log(`Admin:      http://127.0.0.1:${PORT}/admin.html`);
+    const ips = ipv4LANAddresses();
+    if (ips.length) {
+      console.log('Same Wi\u2011Fi / LAN (use from phones & other PCs):');
+      ips.forEach(function (ip) {
+        console.log(`  http://${ip}:${PORT}/shop.html  |  admin: http://${ip}:${PORT}/admin.html`);
+      });
+    } else {
+      console.log('(No non-local IPv4 found \u2014 check Wi\u2011Fi/Ethernet.)');
+    }
   }
   console.log('Dev reset: POST /api/admin/dev-reset  { "devKey", "newPassword", "newPhone" (optional) }');
+  if (loadAuthFromEnv()) {
+    console.log('Auth: loaded from environment variables.');
+  } else {
+    console.log('Auth: loaded from admin-auth.json (set ADMIN_* env vars to persist auth across deploys).');
+  }
 });
