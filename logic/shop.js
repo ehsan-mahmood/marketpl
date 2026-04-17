@@ -1,6 +1,9 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  SECTION 1 — STORE CONFIG & SITE TEXT (data/context.json)         ║
-// ║  Edit data/context.json (csv_url e.g. data/products.csv). HTTP.   ║
+// ║  Edit data/context.json: csv_url + optional products_source.        ║
+// ║  Local CSV: csv_url = data/products.csv. Google Sheet: set          ║
+// ║  products_source to google_sheets and csv_url to the Sheets CSV     ║
+// ║  export URL (https://docs.google.com/.../export?format=csv…).      ║
 // ║  fetch() does not work for file:// URLs.                        ║
 // ╚══════════════════════════════════════════════════════════════════╝
 var CTX = null;

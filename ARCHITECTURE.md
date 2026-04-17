@@ -81,7 +81,7 @@ The server listens on **`0.0.0.0`**, so other devices on the same LAN can use yo
 |--------|---------|
 | **Static hosting** | Serves the project root: HTML, `style/*`, `logic/*`, `data/*`, `assets/*`. |
 | **Path safety** | Resolves paths under the project directory; blocks direct HTTP `GET` of **`admin-auth.json`** and **`data/orders.csv`** (same basename rule as static files). |
-| **Data writes** | **`data/context.json`** and **`data/products.csv`**: resilient writes (temp file + rename + retries on Windows `EBUSY`). **`data/orders.csv`**: checkout **`POST /api/log-order`** appends lines; admin **advance** / **delete** rewrites the file via the same resilient helper. |
+| **Data writes** | **`data/context.json`** and **`data/products.csv`**: resilient writes (temp file + rename + retries on Windows `EBUSY`). **Orders:** either **`data/orders.csv`** (append + full rewrite) or **Google Sheets** when `orders_source` is `google_sheets` (Sheets API append + clear/update). |
 | **Orders logic** | Parses CSV rows, migrates legacy files without `status`, groups line items by `order_id`, and tolerates some broken spreadsheet exports (continuation rows + plausible id heuristics — see `data/orders.csv` below). |
 | **Admin API** | Login, logout, session check, change password, **developer reset** (dev key or `ADMIN_DEV_KEY` env), **orders** list / advance / delete. |
 | **CORS** | `Access-Control-Allow-Origin: *` — fine for same-origin use; be careful if you proxy cross-origin. |
@@ -96,11 +96,12 @@ The server listens on **`0.0.0.0`**, so other devices on the same LAN can use yo
 | `POST` | `/api/admin/change-password` | session | `{ oldPassword, newPassword }` |
 | `POST` | `/api/admin/dev-reset` | dev key | `{ devKey, newPassword, newPhone? }` — resets password (and optionally phone) |
 | `POST` | `/api/save-context` | session | Full JSON → `data/context.json` |
-| `POST` | `/api/save-products` | session | `{ csv: "..." }` → `data/products.csv` |
+| `POST` | `/api/save-products` | session | `{ csv: "..." }` → `data/products.csv` (ignored when `products_source` is `google_sheets`) |
+| `GET` | `/api/admin/products` | session | `{ ok, source, csv }` — product CSV from disk or fetched Google URL per `context.json` |
 | `GET` | `/api/admin/orders` | session | `{ ok, orders[] }` — one object per checkout (`orderId`, customer fields, `subtotal`, `status`, `lines[]` line items) |
 | `POST` | `/api/admin/orders/advance` | session | `{ orderId }` — next status: placed → confirmed → despatched → delivered (`delivered` removes all rows for that id); `{ ok, newStatus }` |
 | `POST` | `/api/admin/orders/delete` | session | `{ orderId }` — removes every CSV row grouped under that order (including continuation lines) |
-| `POST` | `/api/log-order` | — | Checkout log → append rows to `data/orders.csv` (see below) |
+| `POST` | `/api/log-order` | — | Checkout log → append order line rows to `data/orders.csv` or the configured Google Sheet (see below) |
 
 ---
 
@@ -110,10 +111,13 @@ The server listens on **`0.0.0.0`**, so other devices on the same LAN can use yo
 
 Single JSON document driving branding and behaviour:
 
-- `whatsapp`, `page_title`, `csv_url` (e.g. `data/products.csv`)
+- `whatsapp`, `page_title`, `products_source` (`csv` or `google_sheets`), `csv_url` (e.g. `data/products.csv`, or a Google Sheets CSV export URL when using Sheets mode)
+- `orders_source` (`csv`, `google_sheets`, or `google_apps_script`), **`orders_sheet_url`** (browser **edit** or **share** link), **`orders_webhook_url`** (Apps Script web app `/exec` URL), optional **`orders_sheet`**: `{ sheet_name?, spreadsheet_id? }` — `sheet_name` is a fallback when the URL has no `gid`; legacy configs may still set `spreadsheet_id` instead of the URL
 - `store`, `announce`, `trust_items[]`, `pay_methods[]`, `hero`, `footer`
 
-The shop fetches **`data/context.json`** (cache-busted query string). `csv_url` tells `logic/shop.js` where to load products; if empty or fetch fails, an **inline CSV** inside `logic/shop.js` is used as fallback.
+The shop fetches **`data/context.json`** (cache-busted query string). `csv_url` tells `logic/shop.js` where to load products (a site-relative path such as `data/products.csv`, or a full **Google Sheets CSV export** URL if you set `products_source` to `google_sheets` in admin and paste the export link). If `csv_url` is empty or fetch fails, an **inline CSV** inside `logic/shop.js` is used as fallback.
+
+**Switching CSV vs Google Sheets:** In **admin → Context**, choose **Product catalog source**. **Local file** keeps using `data/products.csv` (admin can edit the grid and save). **Google Sheet** sets the catalog from your spreadsheet’s published CSV URL; the admin **Products** tab becomes read-only (edit the sheet, then **Refresh**). Under **Orders storage**, **Local file** uses `data/orders.csv`. **Google Sheet** uses the Sheets API (service account + `google-service-account.json` / `MARKETPL_GOOGLE_CREDENTIALS`). **Google Apps Script webhook** uses `orders_webhook_url` (no service account file needed): checkout sends orders to your deployed Apps Script web app URL.
 
 ### `data/products.csv`
 
@@ -121,10 +125,10 @@ Header row required; columns include: `id`, `name`, `price`, `original_price`, `
 
 **Images:** use site-relative paths such as `assets/product-1.jpg` (served as static files).
 
-### `data/orders.csv`
+### `data/orders.csv` (or Google Sheet tab)
 
-- **Checkout writes:** when a customer completes checkout and taps **Send order on WhatsApp**, `logic/shop.js` sends **`POST /api/log-order`** (JSON body with `orderId`, customer fields, `lines[]`). The server appends **one CSV row per cart line** with **`status` = `placed`**. The WhatsApp step is unchanged; logging is **best-effort** (failures are ignored in the browser so checkout still works).
-- **Admin writes:** advancing status or deleting an order **rewrites** the whole file (resilient write), updating or removing all rows that belong to that checkout.
+- **Checkout writes:** when a customer completes checkout and taps **Send order on WhatsApp**, `logic/shop.js` sends **`POST /api/log-order`** (JSON body with `orderId`, customer fields, `lines[]`). The server appends **one row per cart line** with **`status` = `placed`** (CSV file append, or Sheets **append**). The WhatsApp step is unchanged; logging is **best-effort** (failures are ignored in the browser so checkout still works).
+- **Admin writes:** advancing status or deleting an order **rewrites** all order rows (local resilient write, or **clear + update** on the Sheet tab).
 - **Shape:** one **row per line item**. Rows that belong to the same checkout share the same **`order_id`** and **`placed_at`** (and customer fields / **`order_subtotal`**). **`status`** should match on every row for that order (the server updates all of them on advance).
 - **Columns:**  
   `order_id`, `placed_at`, `customer_name`, `customer_phone`, `address`, `city`, `area`, `note`, `payment_method`, `order_subtotal`, `product_id`, `product_name`, `qty`, `unit_price`, `line_total`, `status`
@@ -161,6 +165,7 @@ Inline `onclick` in `shop.html` (e.g. `setLang`, `toggleChip`, `buyNow`) expects
 |----------|---------|
 | `PORT` | Server port (default `8787`) |
 | `ADMIN_DEV_KEY` | If set, accepted as `devKey` for `/api/admin/dev-reset` (in addition to key in `admin-auth.json`) |
+| `MARKETPL_GOOGLE_CREDENTIALS` | Absolute or project-relative path to the **service account** JSON file used when `orders_source` is `google_sheets`. If unset, the server looks for **`google-service-account.json`** in the project root (gitignored). |
 
 ---
 

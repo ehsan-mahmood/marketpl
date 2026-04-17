@@ -1,0 +1,75 @@
+{
+  "whatsapp": "+61412550608",
+  "page_title": "Joss Finds — জোস ফাইন্ডস",
+  "products_source": "google_sheets",
+  "csv_url": "https://docs.google.com/spreadsheets/d/13V2AqRk5BAtFmA-tNbt96zbslKkhHdlKOdMX7qC0_IA/export?format=csv&gid=0",
+  "orders_source": "google_apps_script",
+  "orders_webhook_url": "https://script.google.com/macros/s/AKfycbzRA7x2IYgRbvvrxE9xGNCcbM2CKA-JyRUNQXCWuwVqZgANMo6UG4g_3Ggys8Q0iBoV/exec",
+  "orders_sheet_url": "https://docs.google.com/spreadsheets/d/13Wtok9Jsy-kF8alxnnIv__DSweLRq5wNxZaG_nWMxtc/export?format=csv&gid=0",
+  "orders_sheet": {
+    "sheet_name": "Sheet1"
+  },
+  "store": {
+    "name_en": "Joss <em>Finds</em>",
+    "name_bn": "জোস <em>ফাইন্ডস</em>",
+    "tagline_en": "জোস ফাইন্ডস · Curated Drops",
+    "tagline_bn": "জোস ফাইন্ডস · বাছাই করা পণ্য"
+  },
+  "announce": {
+    "en": "✦ Free delivery on orders above <strong>৳1,500</strong> · Cash on Delivery · New drops every season ✦",
+    "bn": "✦ ৳১,৫০০-এর উপরে ফ্রি ডেলিভারি · ক্যাশ অন ডেলিভারি · প্রতি সিজনে নতুন পণ্য ✦"
+  },
+  "trust_items": [
+    {
+      "icon": "✅",
+      "en": "<strong>100%</strong> Original Products",
+      "bn": "<strong>১০০%</strong> আসল পণ্য"
+    },
+    {
+      "icon": "🔄",
+      "en": "<strong>7-Day</strong> Easy Return",
+      "bn": "<strong>৭ দিন</strong> রিটার্ন"
+    },
+    {
+      "icon": "🚚",
+      "en": "<strong>Same-day</strong> Dhaka Delivery",
+      "bn": "<strong>একই দিন</strong> ঢাকায় ডেলিভারি"
+    },
+    {
+      "icon": "💬",
+      "en": "WhatsApp <strong>Support</strong>",
+      "bn": "WhatsApp <strong>সাপোর্ট</strong>"
+    }
+  ],
+  "pay_methods": [
+    "bkash",
+    "nagad",
+    "cod"
+  ],
+  "hero": {
+    "eyebrow_en": "Dhaka · Chittagong · Nationwide",
+    "eyebrow_bn": "ঢাকা · চট্টগ্রাম · সারা বাংলাদেশ",
+    "h1_en": "Find things that are actually <em>Joss.</em>",
+    "h1_bn": "সেরা জিনিস খুঁজে পাও,<br><em>একদম জোস দামে।</em>",
+    "p_en": "Curated seasonal drops — fashion, lifestyle, gadgets & more. Order straight via WhatsApp. Cash on delivery, no drama.",
+    "p_bn": "প্রতি সিজনে নতুন কালেকশন। পছন্দের পণ্য বেছে নিন, WhatsApp-এ অর্ডার করুন। ক্যাশ অন ডেলিভারি।",
+    "image_url": "",
+    "fallback_emoji": "🔥",
+    "trust_en": [
+      "Cash on Delivery",
+      "24h Dhaka Delivery",
+      "Easy Returns"
+    ],
+    "trust_bn": [
+      "ক্যাশ অন ডেলিভারি",
+      "২৪ঘন্টায় ঢাকা ডেলিভারি",
+      "সহজ রিটার্ন"
+    ]
+  },
+  "footer": {
+    "copy_en": "Bangladesh · Cash on Delivery · New drops every season",
+    "copy_bn": "বাংলাদেশ · ক্যাশ অন ডেলিভারি · প্রতি সিজনে নতুন পণ্য",
+    "wa_label_en": "Chat with us",
+    "wa_label_bn": "চ্যাট করুন"
+  }
+}
