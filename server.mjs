@@ -17,6 +17,8 @@ const PORT = Number(process.env.PORT) || 8787;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const ASSETS_DIR = path.join(__dirname, 'assets');
+const PRODUCTS_UPLOAD_DIR = path.join(ASSETS_DIR, 'products');
+const MAX_PRODUCT_IMAGE_BYTES = 6 * 1024 * 1024;
 const CONTEXT_PATH = path.join(DATA_DIR, 'context.json');
 const PRODUCTS_PATH = path.join(DATA_DIR, 'products.csv');
 const ORDERS_PATH = path.join(DATA_DIR, 'orders.csv');
@@ -24,6 +26,7 @@ const ORDERS_PATH = path.join(DATA_DIR, 'orders.csv');
 function ensureDataDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
+  if (!fs.existsSync(PRODUCTS_UPLOAD_DIR)) fs.mkdirSync(PRODUCTS_UPLOAD_DIR, { recursive: true });
 }
 
 const AUTH_FILENAME = 'admin-auth.json';
@@ -276,6 +279,120 @@ function readBody(req) {
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
+}
+
+function readBodyBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let n = 0;
+    const cap = maxBytes != null ? maxBytes : 64 * 1024 * 1024;
+    req.on('data', (c) => {
+      n += c.length;
+      if (n > cap) {
+        reject(new Error('Request body too large'));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * First file part in multipart/form-data (Buffer-safe).
+ * @returns {{ filename: string, buffer: Buffer, mime: string } | null}
+ */
+function parseMultipartFirstFile(buf, contentType) {
+  const m = /boundary=([^;]+)/i.exec(contentType || '');
+  if (!m) return null;
+  let b = m[1].trim().replace(/^["']|["']$/g, '');
+  const boundaryBuf = Buffer.from('--' + b, 'utf8');
+  let start = 0;
+  while (start < buf.length) {
+    const idx = buf.indexOf(boundaryBuf, start);
+    if (idx === -1) break;
+    start = idx + boundaryBuf.length;
+    if (start < buf.length && buf[start] === 0x0d && buf[start + 1] === 0x0a) start += 2;
+    else if (start < buf.length && buf[start] === 0x0a) start += 1;
+    let next = buf.indexOf(boundaryBuf, start);
+    if (next === -1) next = buf.length;
+    const part = buf.subarray(start, next);
+    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+    if (headerEnd === -1) {
+      start = next;
+      continue;
+    }
+    const headerStr = part.subarray(0, headerEnd).toString('utf8');
+    if (!/filename=/i.test(headerStr)) {
+      start = next;
+      continue;
+    }
+    const fnMatch = /filename="([^"]*)"|filename\*=UTF-8''([^;\r\n]+)/i.exec(headerStr);
+    const filename = fnMatch ? (fnMatch[1] || decodeURIComponent(fnMatch[2] || '')).trim() : '';
+    if (!filename) {
+      start = next;
+      continue;
+    }
+    let body = part.subarray(headerEnd + 4);
+    if (body.length >= 2 && body[body.length - 2] === 0x0d && body[body.length - 1] === 0x0a) {
+      body = body.subarray(0, body.length - 2);
+    } else if (body.length >= 1 && body[body.length - 1] === 0x0a) {
+      body = body.subarray(0, body.length - 1);
+    }
+    const mimeMatch = /Content-Type:\s*([^\r\n]+)/i.exec(headerStr);
+    const mime = mimeMatch ? mimeMatch[1].trim() : 'application/octet-stream';
+    return { filename, buffer: body, mime };
+  }
+  return null;
+}
+
+function extFromProductImageMime(mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('jpeg')) return '.jpg';
+  if (m.includes('png')) return '.png';
+  if (m.includes('webp')) return '.webp';
+  if (m.includes('gif')) return '.gif';
+  if (m.includes('svg')) return '.svg';
+  return '';
+}
+
+const PRODUCT_IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);
+
+function normalizeWebPath(rel) {
+  return String(rel || '')
+    .replace(/\\/g, '/')
+    .replace(/^\//, '');
+}
+
+async function writeBufferFileResilient(filePath, buffer) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const maxAttempts = 15;
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const tmp = path.join(dir, `.${base}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fsp.writeFile(tmp, buffer);
+    } catch (e) {
+      lastErr = e;
+      await delay(25 + attempt * 30);
+      continue;
+    }
+    try {
+      await fsp.rename(tmp, filePath);
+      return;
+    } catch (e) {
+      await fsp.unlink(tmp).catch(() => {});
+      lastErr = e;
+      if (e.code === 'EBUSY' || e.code === 'EPERM' || e.code === 'EACCES') {
+        await delay(25 + attempt * 30);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr || new Error('Write failed');
 }
 
 function delay(ms) {
@@ -1530,6 +1647,47 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'POST' && pathname === '/api/admin/upload-product-image') {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const ct = (req.headers['content-type'] || '').toLowerCase();
+      if (!ct.includes('multipart/form-data')) {
+        return json(res, 400, { ok: false, error: 'Expected multipart/form-data' });
+      }
+      const buf = await readBodyBuffer(req, MAX_PRODUCT_IMAGE_BYTES + 65536);
+      if (buf.length > MAX_PRODUCT_IMAGE_BYTES) {
+        return json(res, 400, { ok: false, error: 'Image too large (max 6 MB)' });
+      }
+      const parsed = parseMultipartFirstFile(buf, req.headers['content-type'] || ct);
+      if (!parsed || !parsed.buffer.length) {
+        return json(res, 400, { ok: false, error: 'No file in upload' });
+      }
+      let ext = path.extname(parsed.filename).toLowerCase();
+      if (ext === '.jpeg') ext = '.jpg';
+      if (!PRODUCT_IMAGE_EXT.has(ext)) ext = extFromProductImageMime(parsed.mime);
+      if (!ext || !PRODUCT_IMAGE_EXT.has(ext)) {
+        return json(res, 400, {
+          ok: false,
+          error: 'Unsupported image type (use JPG, PNG, WebP, GIF, or SVG)'
+        });
+      }
+      const rawBase = path.basename(parsed.filename, path.extname(parsed.filename));
+      const base = rawBase
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60);
+      const stamp = Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
+      const outName = (base || 'product') + '-' + stamp + ext;
+      ensureDataDirs();
+      const abs = path.join(PRODUCTS_UPLOAD_DIR, outName);
+      await writeBufferFileResilient(abs, parsed.buffer);
+      const rel = normalizeWebPath(path.relative(__dirname, abs));
+      return json(res, 200, { ok: true, path: rel });
+    } catch (e) {
+      return json(res, 400, { ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  }
+
   /* ── Static files ── */
   let filePathname = pathname;
   if (filePathname === '/') filePathname = '/shop.html';
@@ -1576,13 +1734,13 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log('Shop:  /shop.html   Admin: /admin.html');
   } else {
-    console.log(`This PC:  http://127.0.0.1:${PORT}/shop.html`);
+    console.log(`This PC:  http://127.0.0.1:${PORT}/shop-showroom.html`);
     console.log(`Admin:      http://127.0.0.1:${PORT}/admin.html`);
     const ips = ipv4LANAddresses();
     if (ips.length) {
       console.log('Same Wi\u2011Fi / LAN (use from phones & other PCs):');
       ips.forEach(function (ip) {
-        console.log(`  http://${ip}:${PORT}/shop.html  |  admin: http://${ip}:${PORT}/admin.html`);
+        console.log(`  http://${ip}:${PORT}/shop-showroom.html  |  admin: http://${ip}:${PORT}/admin.html`);
       });
     } else {
       console.log('(No non-local IPv4 found \u2014 check Wi\u2011Fi/Ethernet.)');

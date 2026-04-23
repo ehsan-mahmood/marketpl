@@ -7,7 +7,7 @@
   var ordersCanMutate = true;
   var productRows = [];
   var PRODUCT_FIELDS = [
-    'id', 'name', 'price', 'original_price', 'category', 'emoji', 'image_url', 'desc',
+    'id', 'name', 'price', 'original_price', 'category', 'emoji', 'image_urls', 'desc',
     'rating', 'reviews', 'badge', 'in_stock', 'stock', 'views', 'bundle'
   ];
 
@@ -328,6 +328,47 @@
     return o;
   }
 
+  function splitImageUrls(text) {
+    return String(text || '')
+      .split(',')
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+  }
+
+  function joinImageUrls(arr) {
+    return (arr || []).map(function (s) { return String(s || '').trim(); }).filter(Boolean).join(', ');
+  }
+
+  function uploadProductImage(file, onDone) {
+    if (!file) return;
+    var fd = new FormData();
+    fd.append('file', file, file.name || 'upload');
+    fetch('/api/admin/upload-product-image', { method: 'POST', body: fd, credentials: 'include' })
+      .then(function (r) {
+        if (r.status === 401) {
+          showLoginScreen();
+          showMsg('Session expired — sign in again.', false);
+          throw new Error('Unauthorized');
+        }
+        return r.json().then(function (j) {
+          return { ok: r.ok, j: j };
+        });
+      })
+      .then(function (x) {
+        if (!x.ok || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
+        var p = x.j.path != null ? String(x.j.path) : '';
+        if (p && typeof onDone === 'function') {
+          onDone(p);
+        }
+        showMsg('Image saved to ' + p + '. Click “Save products (CSV)” to keep the path in the sheet.', true);
+      })
+      .catch(function (e) {
+        if (String(e.message) !== 'Unauthorized') {
+          showMsg(e && e.message ? e.message : 'Upload failed', false);
+        }
+      });
+  }
+
   function renderProductTable() {
     var readOnly = productsSource === 'google_sheets';
     var tb = $('prod-tbody');
@@ -345,13 +386,122 @@
           ta.value = val;
           ta.readOnly = readOnly;
           td.appendChild(ta);
+        } else if (f === 'image_urls') {
+          td.className = 'col-image_urls';
+          var listWrap = document.createElement('div');
+          listWrap.className = 'prod-image-list';
+          var hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.dataset.f = f;
+          hidden.value = val;
+
+          var list = document.createElement('div');
+          list.className = 'prod-image-list-items';
+          var rowAdd = document.createElement('div');
+          rowAdd.className = 'prod-image-list-add';
+          var addInput = document.createElement('input');
+          addInput.type = 'text';
+          addInput.placeholder = 'https://… or assets/products/…';
+          addInput.readOnly = readOnly;
+          var btnAdd = document.createElement('button');
+          btnAdd.type = 'button';
+          btnAdd.className = 'btn-mini';
+          btnAdd.textContent = 'Add';
+          btnAdd.disabled = readOnly;
+          var btnUpList = document.createElement('button');
+          btnUpList.type = 'button';
+          btnUpList.className = 'btn-mini';
+          btnUpList.textContent = 'Upload';
+          btnUpList.disabled = readOnly;
+          var fileInpList = document.createElement('input');
+          fileInpList.type = 'file';
+          fileInpList.className = 'prod-image-file';
+          fileInpList.accept = 'image/jpeg,image/png,image/webp,image/gif,image/svg+xml';
+          fileInpList.disabled = readOnly;
+
+          function syncHidden(items) {
+            hidden.value = joinImageUrls(items);
+          }
+
+          function renderList(items) {
+            list.innerHTML = '';
+            items.forEach(function (u, itemIdx) {
+              var item = document.createElement('div');
+              item.className = 'prod-image-list-item';
+              var thumb = document.createElement('img');
+              thumb.className = 'prod-image-mini';
+              thumb.alt = '';
+              thumb.src = u;
+              thumb.onerror = function () { thumb.style.visibility = 'hidden'; };
+              var txt = document.createElement('span');
+              txt.className = 'prod-image-list-text';
+              txt.textContent = u;
+              item.appendChild(thumb);
+              item.appendChild(txt);
+              if (!readOnly) {
+                var rm = document.createElement('button');
+                rm.type = 'button';
+                rm.className = 'btn-mini';
+                rm.textContent = '×';
+                rm.title = 'Remove';
+                rm.addEventListener('click', function () {
+                  var now = splitImageUrls(hidden.value);
+                  now.splice(itemIdx, 1);
+                  syncHidden(now);
+                  renderList(now);
+                });
+                item.appendChild(rm);
+              }
+              list.appendChild(item);
+            });
+          }
+
+          function addImageUrl(u) {
+            var v = String(u || '').trim();
+            if (!v) return;
+            var now = splitImageUrls(hidden.value);
+            if (now.indexOf(v) === -1) now.push(v);
+            syncHidden(now);
+            renderList(now);
+            addInput.value = '';
+          }
+
+          btnAdd.addEventListener('click', function () {
+            addImageUrl(addInput.value);
+          });
+          addInput.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter') {
+              ev.preventDefault();
+              addImageUrl(addInput.value);
+            }
+          });
+          btnUpList.addEventListener('click', function () {
+            fileInpList.click();
+          });
+          fileInpList.addEventListener('change', function () {
+            if (!fileInpList.files || !fileInpList.files[0]) return;
+            uploadProductImage(fileInpList.files[0], function (p) {
+              addImageUrl(p);
+            });
+            fileInpList.value = '';
+          });
+
+          rowAdd.appendChild(addInput);
+          rowAdd.appendChild(btnAdd);
+          rowAdd.appendChild(btnUpList);
+          rowAdd.appendChild(fileInpList);
+          listWrap.appendChild(hidden);
+          listWrap.appendChild(list);
+          listWrap.appendChild(rowAdd);
+          td.appendChild(listWrap);
+          renderList(splitImageUrls(val));
         } else {
-          var inp = document.createElement('input');
-          inp.type = 'text';
-          inp.dataset.f = f;
-          inp.value = val;
-          inp.readOnly = readOnly;
-          td.appendChild(inp);
+          var inp2 = document.createElement('input');
+          inp2.type = 'text';
+          inp2.dataset.f = f;
+          inp2.value = val;
+          inp2.readOnly = readOnly;
+          td.appendChild(inp2);
         }
         tr.appendChild(td);
       });
@@ -537,6 +687,21 @@
     updateOrdersChrome();
   });
 
+  function formatFullDelivery(o) {
+    var parts = [];
+    function add(x) {
+      var s = x != null ? String(x).trim() : '';
+      if (s) parts.push(s);
+    }
+    add(o.address);
+    add(o.city);
+    add(o.area);
+    var line = parts.join(', ');
+    var note = o.note != null ? String(o.note).trim() : '';
+    if (note) line = line ? line + ' · ' + note : note;
+    return line;
+  }
+
   function renderOrdersTable(orders) {
     var tb = $('orders-tbody');
     tb.innerHTML = '';
@@ -544,7 +709,7 @@
     if (!orders || !orders.length) {
       var trE = document.createElement('tr');
       var tdE = document.createElement('td');
-      tdE.colSpan = 8;
+      tdE.colSpan = 9;
       tdE.className = 'hint';
       tdE.style.padding = '16px';
       tdE.textContent = 'No orders yet.';
@@ -558,6 +723,10 @@
       tr.appendChild(tdText(o.placedAt || ''));
       tr.appendChild(tdText(o.customerName || ''));
       tr.appendChild(tdText(o.customerPhone || ''));
+      var tdDel = document.createElement('td');
+      tdDel.className = 'orders-delivery';
+      tdDel.textContent = formatFullDelivery(o);
+      tr.appendChild(tdDel);
       var tdIt = document.createElement('td');
       tdIt.className = 'orders-items';
       tdIt.textContent = summarizeOrderLines(o);

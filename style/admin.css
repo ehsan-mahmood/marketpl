@@ -83,7 +83,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--r
 
 .prod-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
 .table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--rl); background: #fff; }
-table.prod { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 1200px; }
+table.prod { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 1400px; }
 table.prod th, table.prod td { border: 1px solid var(--rule); padding: 6px 8px; vertical-align: top; }
 table.prod th { background: #f5f5f5; font-weight: 600; text-align: left; white-space: nowrap; }
 table.prod input, table.prod textarea {
@@ -91,6 +91,23 @@ table.prod input, table.prod textarea {
 }
 table.prod textarea { min-height: 44px; resize: vertical; min-width: 140px; }
 table.prod .col-id { width: 48px; }
+table.prod .col-image_urls { min-width: 260px; max-width: 380px; }
+table.prod .prod-image-file { font-size: 11px; max-width: 160px; }
+table.prod .prod-image-list { display: flex; flex-direction: column; gap: 6px; }
+table.prod .prod-image-list-items { display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; }
+table.prod .prod-image-list-item { display: flex; align-items: center; gap: 6px; }
+table.prod .prod-image-mini {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid var(--rule);
+  background: #f8f8f8;
+  flex-shrink: 0;
+}
+table.prod .prod-image-list-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+table.prod .prod-image-list-add { display: flex; align-items: center; gap: 6px; }
+table.prod .prod-image-list-add input[type="text"] { flex: 1; min-width: 120px; }
 table.prod .col-actions { width: 72px; text-align: center; white-space: nowrap; }
 .btn-mini { padding: 4px 8px; font-size: 11px; border-radius: 6px; border: 1px solid var(--rule); background: #fff; cursor: pointer; }
 .btn-mini:hover { background: #ffebee; border-color: var(--red); color: var(--red); }
@@ -106,6 +123,7 @@ table.orders .orders-actions { display: flex; flex-wrap: wrap; gap: 6px; justify
 table.orders .btn-next { background: var(--red); color: #fff; border: none; }
 table.orders .btn-next:hover { background: var(--red2); }
 table.orders .btn-del { border-color: var(--ink3); }
+table.orders .orders-delivery { font-size: 11px; color: var(--ink2); max-width: 320px; word-break: break-word; }
 table.orders .orders-items { font-size: 11px; color: var(--ink2); max-width: 360px; }
 
 .raw-toggle { margin-top: 10px; font-size: 12px; color: var(--ink3); cursor: pointer; user-select: none; }

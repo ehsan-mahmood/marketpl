@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Joss Finds — জোস ফাইন্ডস</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Hind+Siliguri:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+<link rel="stylesheet" href="style/shop.css">
+<link rel="stylesheet" href="style/shop-showroom.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
+<body class="fade shop-showroom bn">
+
+<div class="announce">
+  <span class="en" id="announce-en"></span>
+  <span class="bn" id="announce-bn"></span>
+</div>
+
+<div class="showroom-trust-wrap">
+  <div class="container showroom-trust-inner">
+    <div class="trust-inner">
+      <div class="trust-item" id="trust-0"></div>
+      <div class="trust-item" id="trust-1"></div>
+      <div class="trust-item" id="trust-2"></div>
+      <div class="trust-item" id="trust-3"></div>
+      <div class="pay-badges" id="pay-badges"></div>
+    </div>
+  </div>
+</div>
+
+<header class="tp-showroom-header">
+  <div class="container py-3">
+    <div class="row align-items-center g-2">
+      <div class="col-7 col-md-6 col-lg-2 order-1">
+        <a class="logo" href="#" id="logo-link">
+          <span id="logo-text-en" class="en"></span><span id="logo-text-bn" class="bn"></span>
+          <span class="logo-sub en" id="logo-sub-en"></span>
+          <span class="logo-sub bn" id="logo-sub-bn"></span>
+        </a>
+      </div>
+      <div class="col-5 col-md-6 col-lg-3 order-2 order-lg-3 ms-lg-0 text-end">
+        <div class="d-inline-flex align-items-center justify-content-end flex-wrap showroom-actions">
+          <div class="lang-toggle">
+            <button class="lang-btn" type="button" id="btn-en" onclick="setLang('en')">EN</button>
+            <button class="lang-btn on" type="button" id="btn-bn" onclick="setLang('bn')">বাং</button>
+          </div>
+          <button class="cart-btn" type="button" id="cart-open-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 001.99 1.61h9.72a2 2 0 001.99-1.61L23 6H6"/></svg>
+            <span class="en">Cart</span><span class="bn">কার্ট</span>
+            <span class="cbadge" id="cbadge">0</span>
+          </button>
+        </div>
+      </div>
+      <div class="col-12 col-lg-7 order-3 order-lg-2 mt-2 mt-lg-0">
+        <div class="tp-search-wrap">
+          <div class="tp-search-inner">
+            <input class="search-input" id="search-input" type="search" placeholder="Search for products…" autocomplete="off">
+            <button type="button" class="tp-search-btn" aria-label="Search" onclick="document.getElementById('search-input').focus();">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 17C13.4183 17 17 13.4183 17 9C17 4.58172 13.4183 1 9 1C4.58172 1 1 4.58172 1 9C1 13.4183 4.58172 17 9 17Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M19 19L14.65 14.65" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="showroom-slider-area" id="showroom-banner" aria-label="Promotions">
+  <div class="showroom-slider-viewport position-relative overflow-hidden">
+    <div class="showroom-slider-track d-flex" id="showroom-banner-track"></div>
+    <!-- <button type="button" class="showroom-slider-nav showroom-slider-prev" id="showroom-banner-prev" aria-label="Previous slide">
+      <svg width="10" height="18" viewBox="0 0 10 18" fill="none" aria-hidden="true"><path d="M9 17L1 9L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button type="button" class="showroom-slider-nav showroom-slider-next" id="showroom-banner-next" aria-label="Next slide">
+      <svg width="10" height="18" viewBox="0 0 10 18" fill="none" aria-hidden="true"><path d="M1 17L9 9L1 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button> -->
+    <div class="showroom-slider-dots" id="showroom-banner-dots"></div>
+  </div>
+</section>
+
+<div class="showroom-cats-outer">
+  <div class="container showroom-cats-inner">
+    <div class="cats-wrap" id="cats-bar">
+      <button class="cat on" type="button" data-cat="all"><span class="en">All</span><span class="bn">সব</span></button>
+      <button class="cat" type="button" data-cat="clothing"><span class="en">Clothing</span><span class="bn">পোশাক</span></button>
+      <button class="cat" type="button" data-cat="footwear"><span class="en">Footwear</span><span class="bn">জুতা</span></button>
+      <button class="cat" type="button" data-cat="accessories"><span class="en">Accessories</span><span class="bn">আনুষাঙ্গিক</span></button>
+      <button class="cat" type="button" data-cat="electronics"><span class="en">Electronics</span><span class="bn">ইলেকট্রনিক্স</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="showroom-hero-wrap">
+  <div class="hero fade f1">
+    <div class="hero-copy">
+      <div class="hero-eyebrow en" id="hero-eyebrow-en"></div>
+      <div class="hero-eyebrow bn" id="hero-eyebrow-bn"></div>
+      <h1 class="hero-h1 en" id="hero-h1-en"></h1>
+      <h1 class="hero-h1 bn" id="hero-h1-bn"></h1>
+      <p class="hero-p en" id="hero-p-en"></p>
+      <p class="hero-p bn" id="hero-p-bn"></p>
+      <div class="hero-trust" id="hero-trust"></div>
+    </div>
+    <div class="hero-visual" id="hero-visual"></div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<div class="deal-strip">
+  <button type="button" class="deal-chip hot" id="chip-hot" onclick="toggleChip('hot')">🔥 <span class="en">Hot Deals</span><span class="bn">হট ডিল</span></button>
+  <button type="button" class="deal-chip cheap" id="chip-cheap" onclick="toggleChip('cheap')">💚 <span class="en">Under ৳999</span><span class="bn">৳৯৯৯-এর নিচে</span></button>
+  <button type="button" class="deal-chip new" id="chip-new" onclick="toggleChip('new')">✨ <span class="en">New Arrivals</span><span class="bn">নতুন পণ্য</span></button>
+</div>
+
+<div class="section fade f2">
+  <div class="sec-hdr">
+    <div class="sec-title" id="sec-label">All Products</div>
+    <div class="sec-count" id="sec-count"></div>
+  </div>
+  <div class="lgrid" id="lgrid">
+    <div class="lcard"><div class="lcard-img skel"></div><div class="lcard-body"><div class="skel" style="height:11px;width:75%"></div><div class="skel" style="height:11px;width:42%"></div><div class="skel" style="height:34px;margin-top:4px"></div></div></div>
+    <div class="lcard"><div class="lcard-img skel"></div><div class="lcard-body"><div class="skel" style="height:11px;width:80%"></div><div class="skel" style="height:11px;width:50%"></div><div class="skel" style="height:34px;margin-top:4px"></div></div></div>
+    <div class="lcard"><div class="lcard-img skel"></div><div class="lcard-body"><div class="skel" style="height:11px;width:68%"></div><div class="skel" style="height:11px;width:38%"></div><div class="skel" style="height:34px;margin-top:4px"></div></div></div>
+    <div class="lcard"><div class="lcard-img skel"></div><div class="lcard-body"><div class="skel" style="height:11px;width:85%"></div><div class="skel" style="height:11px;width:44%"></div><div class="skel" style="height:34px;margin-top:4px"></div></div></div>
+  </div>
+  <div class="grid" id="pgrid" style="display:none"></div>
+  <!-- Small catalogs (< 6 products): cart moves here via shop.js for fewer clicks -->
+  <div id="showroom-inline-cart-anchor" class="showroom-inline-cart-anchor" hidden></div>
+</div>
+
+<div class="ovl" id="pd-ovl"></div>
+<div class="pdrawer" id="pdrawer">
+  <div class="dhandle"></div>
+  <div class="dimg" id="d-img"></div>
+  <div class="dbody">
+    <div class="dbadges" id="d-badges"></div>
+    <div class="dname" id="d-name"></div>
+    <div class="dprices">
+      <div class="dprice" id="d-price"></div>
+      <div class="dorig" id="d-orig"></div>
+      <div class="dsave" id="d-save" style="display:none"></div>
+    </div>
+    <div class="drating" id="d-rating"></div>
+    <div class="ddesc" id="d-desc"></div>
+    <div class="bundle-box" id="d-bundle" style="display:none">
+      <div class="bundle-title en">Frequently Bought Together</div>
+      <div class="bundle-title bn">একসাথে কেনা হয়</div>
+      <div class="bundle-items" id="bundle-items"></div>
+      <div class="bundle-total">
+        <span class="bundle-total-text en">Bundle Total:</span>
+        <span class="bundle-total-text bn">বান্ডেল মোট:</span>
+        <span class="bundle-total-price" id="bundle-price"></span>
+      </div>
+      <button class="btn-bundle" type="button" id="btn-bundle"><span class="en">Add Bundle to Cart 🛒</span><span class="bn">বান্ডেল কার্টে যোগ করুন 🛒</span></button>
+    </div>
+    <div class="qty-row">
+      <div>
+        <div class="dlabel" style="margin-bottom:10px"><span class="en">Quantity</span><span class="bn">পরিমাণ</span></div>
+        <div class="qty-ctrl">
+          <button type="button" id="qminus">−</button>
+          <span id="qval">1</span>
+          <button type="button" id="qplus">+</button>
+        </div>
+      </div>
+      <div class="qsub"><span class="en">Subtotal</span><span class="bn">মোট</span><strong id="qsubtotal">৳0</strong></div>
+    </div>
+    <button class="btn-atc" type="button" id="btn-atc"><span class="en">Add to Cart</span><span class="bn">কার্টে যোগ করুন</span></button>
+    <button class="btn-buy-now-drw" type="button" id="btn-buy-now-drw">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413z"/></svg>
+      <span class="en">Buy Now via WhatsApp</span><span class="bn">এখনই WhatsApp-এ কিনুন</span>
+    </button>
+  </div>
+</div>
+
+<div class="ovl" id="cart-ovl"></div>
+<div class="cart-drw" id="cart-drw">
+  <div class="chdr">
+    <div class="ctitle"><span class="en">Shopping Cart</span><span class="bn">শপিং কার্ট</span></div>
+    <button type="button" class="cclose" id="cart-close" aria-label="Close">✕</button>
+  </div>
+  <div class="cart-body-scroll">
+    <div class="citems" id="citems"></div>
+    <div class="cart-delivery" id="cart-delivery-wrap" style="display:none">
+      <div class="cart-delivery-title"><span class="en">Delivery &amp; billing</span><span class="bn">ডেলিভারি ও বিলিং</span></div>
+      <div class="cart-dlv-field">
+        <label for="cart-dlv-name"><span class="en">Full name *</span><span class="bn">পুরো নাম *</span></label>
+        <input type="text" id="cart-dlv-name" autocomplete="name" placeholder="">
+      </div>
+      <div class="cart-dlv-field">
+        <label for="cart-dlv-phone"><span class="en">Phone *</span><span class="bn">ফোন *</span></label>
+        <input type="tel" id="cart-dlv-phone" autocomplete="tel" placeholder="">
+      </div>
+      <div class="cart-dlv-field">
+        <label for="cart-dlv-addr"><span class="en">Delivery address *</span><span class="bn">ডেলিভারি ঠিকানা *</span></label>
+        <textarea id="cart-dlv-addr" rows="2" autocomplete="street-address" placeholder=""></textarea>
+      </div>
+      <div class="cart-dlv-row">
+        <div class="cart-dlv-field">
+          <label for="cart-dlv-city"><span class="en">City</span><span class="bn">শহর</span></label>
+          <input type="text" id="cart-dlv-city" autocomplete="address-level2" value="Dhaka">
+        </div>
+        <div class="cart-dlv-field">
+          <label for="cart-dlv-area"><span class="en">Thana / area</span><span class="bn">থানা / এলাকা</span></label>
+          <input type="text" id="cart-dlv-area" placeholder="">
+        </div>
+      </div>
+      <div class="cart-dlv-field">
+        <label for="cart-dlv-note"><span class="en">Note for seller</span><span class="bn">বিক্রেতার জন্য নোট</span></label>
+        <input type="text" id="cart-dlv-note" placeholder="">
+      </div>
+      <div class="cart-pay-block">
+        <div class="cart-pay-title"><span class="en">Payment method</span><span class="bn">পেমেন্ট পদ্ধতি</span></div>
+        <div class="cart-pay-options">
+          <label class="cart-pay-row">
+            <input type="radio" name="cart-payment" value="cod" checked>
+            <span class="cart-pay-ico" aria-hidden="true">💵</span>
+            <span class="cart-pay-label"><span class="en">Cash on Delivery</span><span class="bn">ক্যাশ অন ডেলিভারি</span></span>
+            <span class="pay-badge cod">COD</span>
+          </label>
+          <label class="cart-pay-row">
+            <input type="radio" name="cart-payment" value="bkash">
+            <span class="cart-pay-ico" aria-hidden="true">📱</span>
+            <span class="cart-pay-label">bKash <span class="cart-pay-hint">(<span class="en">Send Money</span><span class="bn">সেন্ড মানি</span>)</span></span>
+            <span class="pay-badge bkash">bKash</span>
+          </label>
+          <label class="cart-pay-row">
+            <input type="radio" name="cart-payment" value="nagad">
+            <span class="cart-pay-ico" aria-hidden="true">📱</span>
+            <span class="cart-pay-label">Nagad <span class="cart-pay-hint">(<span class="en">Send Money</span><span class="bn">সেন্ড মানি</span>)</span></span>
+            <span class="pay-badge nagad">Nagad</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cftr" id="cftr" style="display:none">
+    <div class="csum-row csum-subtotal-line">
+      <span><span class="en">Subtotal:</span><span class="bn">সাবটোটাল:</span></span>
+      <span class="csum-subtotal-val" id="cf-sub">৳0</span>
+    </div>
+    <button type="button" class="btn-checkout" id="btn-to-checkout">
+      <span class="en">Checkout</span><span class="bn">চেকআউট</span>
+    </button>
+  </div>
+</div>
+
+<div class="coscreen" id="coscreen">
+  <div class="cohdr">
+    <button class="coback" type="button" id="co-back">←</button>
+    <div class="cotitle"><span class="en">Complete Order</span><span class="bn">অর্ডার সম্পন্ন করুন</span></div>
+  </div>
+  <div class="cobody">
+    <div class="cosec">
+      <div class="cosec-title"><span class="en">Your Details</span><span class="bn">আপনার তথ্য</span></div>
+      <div class="fgrp">
+        <div class="field"><label><span class="en">Full Name *</span><span class="bn">পুরো নাম *</span></label><input type="text" id="co-name" placeholder="e.g. Rahim Uddin" autocomplete="name"></div>
+        <div class="field"><label><span class="en">Phone Number *</span><span class="bn">ফোন নম্বর *</span></label><input type="tel" id="co-phone" placeholder="01711 234 567" autocomplete="tel"></div>
+        <div class="field"><label><span class="en">Delivery Address *</span><span class="bn">ডেলিভারি ঠিকানা *</span></label><textarea id="co-addr" placeholder="House, Road, Area, Thana, District" autocomplete="street-address"></textarea></div>
+        <div class="fgrp fgrp2">
+          <div class="field"><label><span class="en">City</span><span class="bn">শহর</span></label><input type="text" id="co-city" value="Dhaka" autocomplete="address-level2"></div>
+          <div class="field"><label><span class="en">Thana / Area</span><span class="bn">থানা / এলাকা</span></label><input type="text" id="co-area" placeholder="Mirpur-10"></div>
+        </div>
+        <div class="field"><label><span class="en">Note for Seller</span><span class="bn">বিক্রেতার জন্য নোট</span></label><input type="text" id="co-note" placeholder="Colour, size note, gate instructions…"></div>
+      </div>
+    </div>
+    <div class="cosec">
+      <div class="cosec-title"><span class="en">Order Summary</span><span class="bn">অর্ডার সারসংক্ষেপ</span></div>
+      <div class="olines" id="co-lines"></div>
+      <div class="cototals">
+        <div class="cotr"><span class="en">Subtotal</span><span class="bn">সাবটোটাল</span><span id="co-sub">৳0</span></div>
+        <div class="cotr"><span class="en">Delivery charge</span><span class="bn">ডেলিভারি চার্জ</span><span style="color:var(--ink3)" class="en">Seller will confirm</span><span style="color:var(--ink3)" class="bn">বিক্রেতা জানাবেন</span></div>
+        <div class="cotr grand"><span class="en">Estimated Total</span><span class="bn">আনুমানিক মোট</span><span id="co-total">৳0</span></div>
+      </div>
+      <div class="cod-box"><span class="cod-icon">💵</span><span class="en"><strong>Cash on Delivery</strong> — pay only when your order arrives. No advance payment needed.</span><span class="bn"><strong>ক্যাশ অন ডেলিভারি</strong> — পণ্য পৌঁছানোর পরেই পেমেন্ট করুন। কোনো আগাম পেমেন্ট নেই।</span></div>
+    </div>
+    <div class="cosec">
+      <div class="cosec-title"><span class="en">Payment Method</span><span class="bn">পেমেন্ট পদ্ধতি</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;align-items:center;gap:10px;border:1.5px solid var(--rule);border-radius:9px;padding:12px 14px;cursor:pointer">
+          <input type="radio" name="payment" value="cod" checked style="accent-color:var(--red)">
+          <span style="font-size:15px">💵</span>
+          <span style="font-size:13px;font-weight:600;color:var(--ink)"><span class="en">Cash on Delivery</span><span class="bn">ক্যাশ অন ডেলিভারি</span></span>
+          <span class="pay-badge cod" style="margin-left:auto">COD</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;border:1.5px solid var(--rule);border-radius:9px;padding:12px 14px;cursor:pointer">
+          <input type="radio" name="payment" value="bkash" style="accent-color:#e2136e">
+          <span style="font-size:15px">📱</span>
+          <span style="font-size:13px;font-weight:600;color:var(--ink)">bKash <span style="font-size:11px;color:var(--ink3);font-weight:400">(<span class="en">Send Money to seller</span><span class="bn">সেলারকে পাঠান</span>)</span></span>
+          <span class="pay-badge bkash" style="margin-left:auto">bKash</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;border:1.5px solid var(--rule);border-radius:9px;padding:12px 14px;cursor:pointer">
+          <input type="radio" name="payment" value="nagad" style="accent-color:#f4821f">
+          <span style="font-size:15px">📱</span>
+          <span style="font-size:13px;font-weight:600;color:var(--ink)">Nagad <span style="font-size:11px;color:var(--ink3);font-weight:400">(<span class="en">Send Money to seller</span><span class="bn">সেলারকে পাঠান</span>)</span></span>
+          <span class="pay-badge nagad" style="margin-left:auto">Nagad</span>
+        </label>
+      </div>
+    </div>
+      <div class="wa-info">
+        <svg class="wasvg" width="20" height="20" viewBox="0 0 24 24" style="flex-shrink:0;margin-top:1px"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" fill="#25D366"/><path d="M12.004 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.948-1.417A9.956 9.956 0 0012.004 22C17.531 22 22 17.523 22 12S17.531 2 12.004 2z" fill="#25D366"/></svg>
+        <div>
+          <strong class="en">Ordering via WhatsApp</strong><strong class="bn">WhatsApp-এ অর্ডার</strong>
+          <span class="en">Tap <strong>Send order on WhatsApp</strong> (green button). Your full order opens in WhatsApp — then tap <strong>Send</strong> there.</span>
+          <span class="bn">সবুজ <strong>WhatsApp-এ অর্ডার পাঠান</strong> বাটনে ট্যাপ করুন। অর্ডার WhatsApp-ে খুলবে — সেখানে <strong>Send</strong> চাপুন।</span>
+        </div>
+      </div>
+    <div class="co-cta-inline">
+      <button type="button" class="btn-wa-order btn-wa-order--inline" id="btn-wa-order-inline" aria-label="Send order on WhatsApp">
+        <svg class="wasvg" width="20" height="20" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12.004 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.948-1.417A9.956 9.956 0 0012.004 22C17.531 22 22 17.523 22 12S17.531 2 12.004 2z"/></svg>
+        <span class="en">Send Order on WhatsApp</span><span class="bn">WhatsApp-এ অর্ডার পাঠান</span>
+      </button>
+    </div>
+  </div>
+  <div class="coftr">
+    <button type="button" class="btn-wa-order" id="btn-wa-order">
+      <svg class="wasvg" width="20" height="20" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12.004 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.948-1.417A9.956 9.956 0 0012.004 22C17.531 22 22 17.523 22 12S17.531 2 12.004 2z"/></svg>
+      <span class="en">Send Order on WhatsApp</span><span class="bn">WhatsApp-এ অর্ডার পাঠান</span>
+    </button>
+  </div>
+</div>
+
+<div class="rv-section" id="rv-section" style="display:none">
+  <div class="rv-hdr en">Recently Viewed</div>
+  <div class="rv-hdr bn">সম্প্রতি দেখা</div>
+  <div class="rv-scroll" id="rv-scroll"></div>
+</div>
+
+<div class="order-complete-screen" id="order-complete-screen" aria-hidden="true">
+  <div class="order-complete-inner">
+    <div class="order-complete-check" aria-hidden="true">✓</div>
+    <h2 class="order-complete-h2"><span class="en">Order complete</span><span class="bn">অর্ডার সম্পন্ন</span></h2>
+    <p class="order-complete-refline"><span class="en">Your order number</span><span class="bn">আপনার অর্ডার নম্বর</span>: <strong id="order-complete-number">—</strong></p>
+    <p class="order-complete-sub"><span class="en">We’ve received your order. The seller will confirm delivery and payment details.</span><span class="bn">আপনার অর্ডার পেয়েছি। বিক্রেতা ডেলিভারি ও পেমেন্ট নিশ্চিত করবেন।</span></p>
+    <div class="order-complete-actions">
+      <button type="button" class="btn-order-done" id="order-complete-close"><span class="en">Continue shopping</span><span class="bn">কেনাকাটা চালিয়ে যান</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<footer>
+  <div class="foot-brand" id="foot-brand"></div>
+  <div class="foot-copy"><span class="en" id="foot-copy-en"></span><span class="bn" id="foot-copy-bn"></span></div>
+  <a class="foot-wa" id="foot-wa-link" href="#" target="_blank">
+    <svg class="wasvg" width="13" height="13" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12.004 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.948-1.417A9.956 9.956 0 0012.004 22C17.531 22 22 17.523 22 12S17.531 2 12.004 2z"/></svg>
+    <span class="en" id="foot-wa-en"></span><span class="bn" id="foot-wa-bn"></span>
+  </a>
+</footer>
+
+<script src="logic/shop.js" defer></script>
+</body>
+</html>

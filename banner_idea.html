@@ -1,0 +1,71 @@
+<div class="banner-bn">
+  <div class="banner-bn__overlay"></div>
+  <div class="banner-bn__content">
+    <div class="banner-bn__tag">নতুন কালেকশন</div>
+    <h1>স্টাইলিশ শার্ট ও জুতার সেরা সংগ্রহ</h1>
+    <p>প্রতিদিনের ব্যবহার আর স্পেশাল দিনের জন্য প্রিমিয়াম কোয়ালিটির পণ্য এখন এক জায়গায়।</p>
+  </div>
+</div>
+
+<style>
+.banner-bn {
+  position: relative;
+  min-height: 320px;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 28px;
+  background-image: url("assets/photo-1685652411582-4499aa17b3be.webp");
+  background-size: cover;
+  background-position: center;
+}
+
+.banner-bn__overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, rgba(8, 12, 20, 0.74) 0%, rgba(8, 12, 20, 0.58) 45%, rgba(8, 12, 20, 0.38) 100%);
+}
+
+.banner-bn__content {
+  position: relative;
+  z-index: 1;
+  max-width: 620px;
+  color: #fff;
+}
+
+.banner-bn__tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.banner-bn h1 {
+  margin: 0 0 10px;
+  font-size: clamp(28px, 3.8vw, 42px);
+  line-height: 1.2;
+}
+
+.banner-bn p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+@media (max-width: 640px) {
+  .banner-bn {
+    min-height: 280px;
+    padding: 20px;
+  }
+  .banner-bn p {
+    font-size: 14px;
+  }
+}
+</style>

@@ -42,8 +42,6 @@
     }
   ],
   "pay_methods": [
-    "bkash",
-    "nagad",
     "cod"
   ],
   "hero": {

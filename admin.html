@@ -259,7 +259,7 @@
   <div class="panel" id="p-products">
     <div class="card">
       <h2 id="prod-panel-title">Products</h2>
-      <p class="hint" id="prod-panel-hint" style="margin-bottom:12px">Edit rows below or add/remove products. Put images in <code>assets/</code> and set <code>image_url</code> to e.g. <code>assets/shirt.jpg</code>. Boolean <code>in_stock</code> is TRUE/FALSE. Bundle IDs: comma-separated (e.g. <code>2,16</code>).</p>
+      <p class="hint" id="prod-panel-hint" style="margin-bottom:12px">Edit rows below or add/remove products. <strong>image_urls</strong> is a comma-separated list (first URL is used as the cover image). You can paste <code>https://…</code> links, type local paths like <code>assets/products/photo.jpg</code>, or use <strong>Upload</strong> (saved under <code>assets/products/</code>). Boolean <code>in_stock</code> is TRUE/FALSE. Bundle IDs: comma-separated (e.g. <code>2,16</code>).</p>
       <p class="hint" id="products-sheets-notice" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;background:rgba(120,140,200,0.12);border:1px solid rgba(120,140,200,0.35)">Catalog is read from your Google Sheet. Edit the spreadsheet in Google, then use <strong>Refresh</strong> below. Saving to <code>data/products.csv</code> is disabled in this mode.</p>
       <div class="prod-toolbar">
         <button type="button" class="btn btn-ghost" id="btn-reload-products">Refresh</button>
@@ -276,7 +276,7 @@
               <th>original_price</th>
               <th>category</th>
               <th>emoji</th>
-              <th>image_url</th>
+              <th class="col-image_urls">image_urls (list)</th>
               <th>desc</th>
               <th>rating</th>
               <th>reviews</th>
@@ -311,6 +311,7 @@
               <th>placed_at</th>
               <th>customer</th>
               <th>phone</th>
+              <th>delivery</th>
               <th>items</th>
               <th class="col-sub">subtotal</th>
               <th class="col-st">status</th>

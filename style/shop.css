@@ -96,6 +96,9 @@ body:not(.bn) .bn { display: none !important; }
 .pcard-img img{width:100%;height:100%;object-fit:cover;transition:transform .4s}
 .pcard:hover .pcard-img img{transform:scale(1.04)}
 .pcard-emoji{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:52px}
+.card-img-dots{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);display:flex;gap:5px;z-index:3}
+.card-img-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.55);border:1px solid rgba(0,0,0,.15)}
+.card-img-dots span.on{background:#fff}
 .pbadge{position:absolute;top:10px;left:10px;border-radius:4px;padding:3px 8px;font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
 .pb-sale{background:var(--red);color:#fff}
 .pb-new{background:var(--ink);color:#fff}
@@ -130,9 +133,13 @@ body:not(.bn) .bn { display: none !important; }
 .pdrawer{position:fixed;bottom:0;left:0;right:0;background:#fff;border-radius:20px 20px 0 0;z-index:301;max-height:90vh;overflow-y:auto;transform:translateY(101%);transition:transform .32s cubic-bezier(.25,.46,.45,.94);border-top:1px solid var(--rule)}
 .pdrawer.on{transform:translateY(0)}
 .dhandle{width:32px;height:3px;background:var(--rule);border-radius:2px;margin:14px auto 0}
-.dimg{width:100%;height:220px;overflow:hidden;background:var(--surface)}
-.dimg img{width:100%;height:100%;object-fit:cover}
+.dimg{width:100%;height:220px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center}
+.dimg img{width:100%;height:100%;object-fit:contain;background:#fff}
 .dimg-emoji{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:80px}
+.dimg-thumbs{display:flex;gap:8px;overflow-x:auto;padding:10px 22px 0}
+.dimg-thumb-btn{width:54px;height:54px;border:1.5px solid var(--rule);border-radius:8px;padding:0;background:#fff;overflow:hidden;cursor:pointer;flex-shrink:0}
+.dimg-thumb-btn img{width:100%;height:100%;object-fit:cover}
+.dimg-thumb-btn.on{border-color:var(--red)}
 .dbody{padding:20px 22px 36px}
 .dbadges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .dname{font-family:var(--font-display);font-size:24px;font-weight:800;line-height:1.2;margin-bottom:8px;letter-spacing:-.5px;color:var(--ink)}
@@ -153,7 +160,7 @@ body:not(.bn) .bn { display: none !important; }
 .btn-atc{width:100%;background:var(--red);color:#fff;border:none;border-radius:10px;padding:15px;font-size:14px;font-family:inherit;font-weight:700;cursor:pointer;transition:background .18s;letter-spacing:.3px}
 .btn-atc:hover{background:var(--red2)}
 
-/* CART DRAWER */
+/* CART DRAWER (default shop.html) */
 .cart-drw{position:fixed;top:0;right:0;bottom:0;width:min(100vw,400px);background:#fff;z-index:400;transform:translateX(101%);transition:transform .3s cubic-bezier(.25,.46,.45,.94);display:flex;flex-direction:column;border-left:1px solid var(--rule)}
 .cart-drw.on{transform:translateX(0)}
 .chdr{padding:20px 22px 18px;border-bottom:1px solid var(--rule);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
