@@ -7,6 +7,7 @@
 // ║  fetch() does not work for file:// URLs.                        ║
 // ╚══════════════════════════════════════════════════════════════════╝
 var CTX = null;
+var ASSET_BANNER_SLIDES = [];
 
 function loadContext() {
   /* Query string avoids stale data/context.json when the browser or dev server caches aggressively. */
@@ -17,6 +18,21 @@ function loadContext() {
     })
     .then(function (data) {
       CTX = data;
+    });
+}
+
+function loadAssetBannerSlides() {
+  return fetch('/api/banners?cb=' + Date.now(), { cache: 'no-store' })
+    .then(function (res) {
+      if (!res.ok) throw new Error('/api/banners HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function (data) {
+      var slides = data && Array.isArray(data.slides) ? data.slides : [];
+      ASSET_BANNER_SLIDES = slides.map(function (u) { return String(u || '').trim(); }).filter(Boolean);
+    })
+    .catch(function () {
+      ASSET_BANNER_SLIDES = [];
     });
 }
 
@@ -160,7 +176,124 @@ function applyPayMethodVisibility() {
 function si(id){ return document.getElementById(id); }
 
 function isShowroom() {
-  return typeof document !== 'undefined' && document.body && document.body.classList.contains('shop-showroom');
+  if (typeof document === 'undefined' || !document.body) return false;
+  if (document.body.classList.contains('shop-showroom')) return true;
+  /* shop-showroom template always includes this; use as fallback if body class changes */
+  return !!document.getElementById('drawer-var-wrap');
+}
+
+var BD_DISTRICTS = [];
+var BD_UPAZILAS_BY_DISTRICT = {};
+var BD_BASE_DELIVERY_CHARGE = 0;
+var BD_DISTRICT_DELIVERY_CHARGE = {};
+
+function fillSelectOptions(selectEl, items, placeholder) {
+  if (!selectEl) return;
+  var opts = ['<option value="">' + escHtml(placeholder) + '</option>'];
+  (items || []).forEach(function (item) {
+    var v = String(item || '').trim();
+    if (!v) return;
+    opts.push('<option value="' + escAttr(v) + '">' + escHtml(v) + '</option>');
+  });
+  selectEl.innerHTML = opts.join('');
+}
+
+function getUpazilasForDistrict(district) {
+  var key = String(district || '').trim();
+  return BD_UPAZILAS_BY_DISTRICT[key] ? BD_UPAZILAS_BY_DISTRICT[key].slice() : [];
+}
+
+function parseDeliveryCharge(v) {
+  var n = Number(v);
+  return isFinite(n) && n > 0 ? n : 0;
+}
+
+function resolveDistrictDeliveryCharge(district) {
+  var key = String(district || '').trim();
+  var districtCharge = parseDeliveryCharge(BD_DISTRICT_DELIVERY_CHARGE[key]);
+  if (districtCharge > 0) return districtCharge;
+  return parseDeliveryCharge(BD_BASE_DELIVERY_CHARGE);
+}
+
+function getSelectedDeliveryCharge(prefix) {
+  var districtEl = si(prefix + '-district');
+  var upazilaEl = si(prefix + '-upazila');
+  if (!districtEl || !upazilaEl) return 0;
+  var district = String(districtEl.value || '').trim();
+  var upazila = String(upazilaEl.value || '').trim();
+  if (!district || !upazila) return 0;
+  var validUps = getUpazilasForDistrict(district);
+  if (validUps.indexOf(upazila) < 0) return 0;
+  return resolveDistrictDeliveryCharge(district);
+}
+
+function refreshUpazilaSelect(upazilaSelectId, districtValue, preferValue) {
+  var upazilaEl = si(upazilaSelectId);
+  if (!upazilaEl) return;
+  var list = getUpazilasForDistrict(districtValue);
+  fillSelectOptions(upazilaEl, list, t('Select thana/upazila', 'থানা / উপজেলা সিলেক্ট করুন'));
+  if (preferValue && list.indexOf(preferValue) >= 0) upazilaEl.value = preferValue;
+}
+
+function mirrorDistrictUpazila(fromPrefix, toPrefix) {
+  var fromDistrict = si(fromPrefix + '-district');
+  var fromUpazila = si(fromPrefix + '-upazila');
+  var toDistrict = si(toPrefix + '-district');
+  var toUpazila = si(toPrefix + '-upazila');
+  if (!fromDistrict || !fromUpazila || !toDistrict || !toUpazila) return;
+  toDistrict.value = fromDistrict.value;
+  refreshUpazilaSelect(toPrefix + '-upazila', toDistrict.value, fromUpazila.value);
+}
+
+function wireDistrictUpazila(prefix, mirrorPrefix) {
+  var districtEl = si(prefix + '-district');
+  if (!districtEl) return;
+  districtEl.addEventListener('change', function () {
+    refreshUpazilaSelect(prefix + '-upazila', districtEl.value, '');
+    if (mirrorPrefix) mirrorDistrictUpazila(prefix, mirrorPrefix);
+  });
+  var upazilaEl = si(prefix + '-upazila');
+  if (upazilaEl && mirrorPrefix) {
+    upazilaEl.addEventListener('change', function () {
+      mirrorDistrictUpazila(prefix, mirrorPrefix);
+    });
+  }
+}
+
+function initDistrictUpazilaData() {
+  if (!si('cart-dlv-district') && !si('co-district')) return Promise.resolve();
+  return fetch('data/bangladesh_districts_upazilas_map.json?cb=' + Date.now(), { cache: 'no-store' })
+    .then(function (res) {
+      if (!res.ok) throw new Error('district map HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function (data) {
+      var byDistrict = {};
+      BD_BASE_DELIVERY_CHARGE = parseDeliveryCharge(data.delivery_charge);
+      (data.divisions || []).forEach(function (division) {
+        (division.districts || []).forEach(function (entry) {
+          var district = String(entry.district || '').trim();
+          if (!district) return;
+          byDistrict[district] = (entry.upazilas || []).map(function (u) { return String(u || '').trim(); }).filter(Boolean);
+          BD_DISTRICT_DELIVERY_CHARGE[district] = parseDeliveryCharge(entry.delivery_charge);
+        });
+      });
+      BD_UPAZILAS_BY_DISTRICT = byDistrict;
+      BD_DISTRICTS = Object.keys(byDistrict).sort(function (a, b) { return a.localeCompare(b); });
+
+      var districtPlaceholder = t('Select district', 'জেলা সিলেক্ট করুন');
+      fillSelectOptions(si('cart-dlv-district'), BD_DISTRICTS, districtPlaceholder);
+      fillSelectOptions(si('co-district'), BD_DISTRICTS, districtPlaceholder);
+      refreshUpazilaSelect('cart-dlv-upazila', '', '');
+      refreshUpazilaSelect('co-upazila', '', '');
+
+      wireDistrictUpazila('cart-dlv', 'co');
+      wireDistrictUpazila('co', 'cart-dlv');
+    })
+    .catch(function (err) {
+      console.error('Could not load district/upazila map:', err);
+      toast(t('Could not load district list. Please refresh.', 'জেলা তালিকা লোড হয়নি। রিফ্রেশ করুন।'));
+    });
 }
 
 /** Optional top banner (shop-showroom): CTX.banner_slides[] URLs, else hero.image_url, else default image */
@@ -171,6 +304,9 @@ function applyShowroomBanner() {
   var slides = [];
   if (CTX.banner_slides && CTX.banner_slides.length) {
     slides = CTX.banner_slides.map(function (u) { return String(u || '').trim(); }).filter(Boolean);
+  }
+  if (!slides.length && ASSET_BANNER_SLIDES && ASSET_BANNER_SLIDES.length) {
+    slides = ASSET_BANNER_SLIDES.slice();
   }
   if (!slides.length && CTX.hero && CTX.hero.image_url) {
     slides = [String(CTX.hero.image_url).trim()];
@@ -405,24 +541,147 @@ function starsHtml(rating){
   return s+'</span>';
 }
 
-/* ── CARD INLINE QTY ── */
-function getCardQty(pid){ return cardQty[pid]||1; }
-function setCardQty(pid,delta,e){
+/* ── CARD INLINE QTY (showroom: per size when product has variations) ── */
+function productNeedsShowroomVariant(p) {
+  return isShowroom() && p && p.variations && p.variations.length;
+}
+/** Max variation chips on the product card; extra options open in the drawer. */
+var SHOWROOM_VAR_CARD_LIMIT = 4;
+
+function getShowroomCardSelectedVariant(pid) {
+  var wrap = document.querySelector('#pgrid .showroom-var-chips[data-pid="' + pid + '"]');
+  if (!wrap) return '';
+  var ch = wrap.querySelector('.showroom-var-chip.is-selected[data-v]');
+  if (!ch) return '';
+  return String(ch.getAttribute('data-v') != null ? ch.getAttribute('data-v') : '').trim();
+}
+function showroomCardQtyKey(pid) {
+  var p = PRODUCTS.find(function (x) { return x.id === pid; });
+  if (!productNeedsShowroomVariant(p)) return String(pid);
+  var v = getShowroomCardSelectedVariant(pid);
+  if (!v) return String(pid) + '\u0002__pick__';
+  return String(pid) + '\u0002' + v;
+}
+function getCardQtyStoreKey(pid) {
+  var p = PRODUCTS.find(function (x) { return x.id === pid; });
+  if (productNeedsShowroomVariant(p)) return showroomCardQtyKey(pid);
+  return String(pid);
+}
+function getCardQty(pid) {
+  var k = getCardQtyStoreKey(pid);
+  return cardQty[k] || 1;
+}
+function setCardQty(pid, delta, e) {
   e.stopPropagation();
-  var q=Math.max(1,(cardQty[pid]||1)+delta);
-  cardQty[pid]=q;
-  var el=document.getElementById('cqv-'+pid);
-  if(el) el.textContent=q;
+  var k = getCardQtyStoreKey(pid);
+  var q = Math.max(1, (cardQty[k] || 1) + delta);
+  cardQty[k] = q;
+  var el = document.getElementById('cqv-' + pid);
+  if (el) el.textContent = q;
+}
+/** Hint/flash: dimmed red tint, no border — target is .showroom-var-row (card) or #drawer-var-wrap */
+function flashShowroomVarHintTarget(el) {
+  if (!el) return null;
+  if (el.id === 'drawer-var-wrap') return el;
+  if (el.closest && el.closest('#drawer-var-wrap')) return document.getElementById('drawer-var-wrap');
+  if (el.closest) {
+    var row = el.closest('.showroom-var-row');
+    if (row) return row;
+  }
+  return el;
+}
+function flashShowroomVarWrap(wrap) {
+  var target = flashShowroomVarHintTarget(wrap);
+  if (!target) return;
+  target.classList.remove('showroom-var--shake');
+  void target.offsetWidth;
+  target.classList.add('showroom-var--hint', 'showroom-var--shake');
+  setTimeout(function () { target.classList.remove('showroom-var--shake'); }, 500);
+}
+function flashShowroomVarRequiredForPid(pid) {
+  flashShowroomVarWrap(document.querySelector('#pgrid .showroom-var-chips[data-pid="' + pid + '"]'));
+}
+function flashShowroomDrawerVarRequired() {
+  flashShowroomVarWrap(document.getElementById('drawer-var-wrap'));
 }
 
-/* ── BUY NOW (direct WhatsApp, skip cart) ── */
+function showroomVarChipsGroupHtml(p, isDrawer) {
+  var label = t('Size / option', 'সাইজ / অপশন');
+  if (isDrawer) {
+    var listD = p.variations && p.variations.length ? p.variations : [];
+    var innerD = listD.map(function (v) {
+      return '<button type="button" class="showroom-var-chip" data-v="' + escAttr(v) + '" role="radio" aria-pressed="false">'
+        + escHtml(v) + '</button>';
+    }).join('');
+    return '<div class="showroom-var-chips showroom-var-chips--drawer" role="radiogroup" aria-label="' + escAttr(label) + '">' + innerD + '</div>';
+  }
+  if (!p.variations || !p.variations.length) return '';
+  if (p.variations.length > SHOWROOM_VAR_CARD_LIMIT) {
+    var first = p.variations.slice(0, SHOWROOM_VAR_CARD_LIMIT);
+    var moreLbl = t('View all sizes', 'সব সাইজ দেখুন');
+    var innerCard = first.map(function (v) {
+      return '<button type="button" class="showroom-var-chip" data-v="' + escAttr(v) + '" role="radio" aria-pressed="false">'
+        + escHtml(v) + '</button>';
+    }).join('');
+    return '<div class="showroom-var-chips showroom-var-chips--split" data-pid="' + p.id + '">'
+      + '<div class="showroom-var-chips-group" role="radiogroup" aria-label="' + escAttr(label) + '">' + innerCard + '</div>'
+      + '<button type="button" class="showroom-var-more" data-pid="' + p.id + '" title="' + escAttr(moreLbl) + '" aria-label="' + escAttr(moreLbl) + '">+</button>'
+      + '</div>';
+  }
+  var innerA = p.variations.map(function (v) {
+    return '<button type="button" class="showroom-var-chip" data-v="' + escAttr(v) + '" role="radio" aria-pressed="false">'
+      + escHtml(v) + '</button>';
+  }).join('');
+  return '<div class="showroom-var-chips" data-pid="' + p.id + '" role="radiogroup" aria-label="' + escAttr(label) + '">' + innerA + '</div>';
+}
+function bindShowroomDrawerChips() {
+  var w = document.getElementById('drawer-var-wrap');
+  if (!w) return;
+  w.querySelectorAll('.showroom-var-chip').forEach(function (chip) {
+    chip.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var par = chip.closest('.showroom-var-chips');
+      if (!par) return;
+      par.querySelectorAll('.showroom-var-chip').forEach(function (c) {
+        c.classList.remove('is-selected');
+        c.setAttribute('aria-pressed', 'false');
+      });
+      chip.classList.add('is-selected');
+      chip.setAttribute('aria-pressed', 'true');
+      var drw = document.getElementById('drawer-var-wrap');
+      if (drw) {
+        drw.classList.remove('showroom-var--hint', 'showroom-var--shake');
+      }
+    });
+  });
+}
+
+/* ── BUY NOW: showroom → add to cart + open cart; classic shop → WhatsApp quick order ── */
 function buyNow(pid,qty,e){
   if(e) e.stopPropagation();
   var p=PRODUCTS.find(function(x){return x.id===pid;});
   if(!p||!p.inStock) return;
+  if (productNeedsShowroomVariant(p)) {
+    var v = getShowroomCardSelectedVariant(pid);
+    if (!v) {
+      flashShowroomVarRequiredForPid(pid);
+      toast(t('Please select a size.','অনুগ্রহ করে সাইজ বেছে নিন।'));
+      return;
+    }
+  }
   var q=qty||getCardQty(pid);
+  if (isShowroom()) {
+    var vCart = productNeedsShowroomVariant(p) ? getShowroomCardSelectedVariant(pid) : null;
+    addToCart(p, q, vCart || undefined);
+    openCart();
+    toast(t('Added to cart! 🛒','কার্টে যোগ হয়েছে! 🛒'));
+    return;
+  }
+  var sizeLine = (productNeedsShowroomVariant(p)
+    ? ('\n' + t('Size','সাইজ') + ': *' + getShowroomCardSelectedVariant(pid) + '*\n')
+    : '');
   var msg='🛍️ *Quick Order — '+CFG.STORE_NAME+'*\n\n'
-    +'Product: *'+p.name+'*\n'
+    +'Product: *'+p.name+'*' + sizeLine
     +'Quantity: '+q+'\n'
     +'Price: '+taka(p.price)+' × '+q+' = *'+taka(p.price*q)+'*\n\n'
     +'Please confirm my order and share delivery details. 🙏';
@@ -441,6 +700,56 @@ function toggleChip(chip){
 /* ── SEARCH ── */
 function handleSearch(val){searchQuery=val.toLowerCase().trim();applyFilters();}
 
+/* Category nav: built from product data (renderCatsBar in showGrid). */
+var CATEGORY_LABELS = {
+  clothing: { en: 'Clothing', bn: 'পোশাক' },
+  footwear: { en: 'Footwear', bn: 'জুতা' },
+  accessories: { en: 'Accessories', bn: 'আনুষাঙ্গিক' },
+  electronics: { en: 'Electronics', bn: 'ইলেকট্রনিক্স' }
+};
+
+function uniqueCategoriesFromProducts() {
+  var seen = Object.create(null);
+  PRODUCTS.forEach(function (p) {
+    var c = (p.category == null ? '' : String(p.category)).trim().toLowerCase();
+    if (c) seen[c] = true;
+  });
+  return Object.keys(seen).sort();
+}
+
+function categoryDisplayLabel(slug) {
+  if (slug === 'all') return { en: 'All Products', bn: 'সব পণ্য' };
+  var L = CATEGORY_LABELS[slug];
+  if (L) return L;
+  var raw = String(slug || '').replace(/[-_]+/g, ' ').trim();
+  if (!raw) return { en: 'Other', bn: 'অন্যান্য' };
+  var cap = raw.split(/\s+/).map(function (w) {
+    if (!w.length) return '';
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  }).join(' ') || raw;
+  return { en: cap, bn: cap };
+}
+
+function renderCatsBar() {
+  var bar = document.getElementById('cats-bar');
+  if (!bar) return;
+  var slugs = uniqueCategoriesFromProducts();
+  if (activeCat !== 'all' && slugs.indexOf(activeCat) < 0) {
+    activeCat = 'all';
+  }
+  var h =
+    '<button class="cat' + (activeCat === 'all' ? ' on' : '') + '" type="button" data-cat="all">'
+    + '<span class="en">All</span><span class="bn">সব</span></button>';
+  for (var i = 0; i < slugs.length; i++) {
+    var slug = slugs[i];
+    var L = categoryDisplayLabel(slug);
+    h +=
+      '<button class="cat' + (activeCat === slug ? ' on' : '') + '" type="button" data-cat="' + escAttr(slug) + '">'
+      + '<span class="en">' + escHtml(L.en) + '</span><span class="bn">' + escHtml(L.bn) + '</span></button>';
+  }
+  bar.innerHTML = h;
+}
+
 /* ── COMBINED FILTER ── */
 function applyFilters(){
   var list=PRODUCTS;
@@ -449,8 +758,15 @@ function applyFilters(){
   if(activeChip==='cheap') list=list.filter(function(p){return p.price<1000;});
   if(activeChip==='new') list=list.filter(function(p){return p.badge==='new';});
   if(searchQuery) list=list.filter(function(p){return p.name.toLowerCase().includes(searchQuery)||(p.desc||'').toLowerCase().includes(searchQuery);});
-  var labels={all:t('All Products','সব পণ্য'),clothing:t('Clothing','পোশাক'),footwear:t('Footwear','জুতা'),accessories:t('Accessories','আনুষাঙ্গিক'),electronics:t('Electronics','ইলেকট্রনিক্স')};
-  document.getElementById('sec-label').textContent=searchQuery?t('Search Results','সার্চ ফলাফল'):(labels[activeCat]||activeCat);
+  var secTitle = searchQuery
+    ? t('Search Results', 'সার্চ ফলাফল')
+    : (activeCat === 'all'
+        ? t('All Products', 'সব পণ্য')
+        : (function () {
+            var cLab = categoryDisplayLabel(activeCat);
+            return t(cLab.en, cLab.bn);
+          })());
+  document.getElementById('sec-label').textContent = secTitle;
   document.getElementById('sec-count').textContent=list.length+' '+t('items','টি পণ্য');
   renderGrid(list);
 }
@@ -553,11 +869,19 @@ function renderGridShowroom(list) {
     }
     priceRow += '</div></div>';
     var ratingMini = '<div class="tp-product-rating-line">'+starsHtml(p.rating || 0)+'<span class="tp-rating-n">('+p.reviews+')</span></div>';
+    var varRow = '';
+    if (p.inStock && p.variations && p.variations.length) {
+      varRow = '<div class="showroom-var-row">'
+        + '<div class="showroom-var-lbl">' + t('Size / option', 'সাইজ / অপশন') + '</div>'
+        + showroomVarChipsGroupHtml(p, false)
+        + '</div>';
+    }
     var cardFoot = '';
     if (p.inStock) {
-      var cq = getCardQty(p.id);
-      cardFoot =
-        '<div class="card-qty-row tp-card-qty" id="cqr-'+p.id+'">'
+      var needVar = p.variations && p.variations.length;
+      var cq = needVar ? 1 : getCardQty(p.id);
+      cardFoot = varRow
+        + '<div class="card-qty-row tp-card-qty" id="cqr-'+p.id+'">'
         +'<div class="card-qty">'
         +'<button type="button" onclick="setCardQty('+p.id+',-1,event);return false">−</button>'
         +'<span id="cqv-'+p.id+'">'+cq+'</span>'
@@ -581,6 +905,11 @@ function renderGridShowroom(list) {
       +'<div class="pcard-foot tp-pcard-foot">'+cardFoot+'</div>'
       +'</div></div>';
   }).join('');
+  g.querySelectorAll('.showroom-var-chips[data-pid]').forEach(function (wrap) {
+    var pid = parseInt(wrap.getAttribute('data-pid'), 10);
+    var cqv = document.getElementById('cqv-' + pid);
+    if (cqv) cqv.textContent = String(getCardQty(pid));
+  });
   initCardSlideshows();
 }
 
@@ -665,7 +994,13 @@ function renderRV(){
 }
 
 /* ── CART ── */
-function cartKey(p){return 'p'+p.id;}
+function cartKey(p, variant) {
+  if (productNeedsShowroomVariant(p)) {
+    var v = (variant == null) ? '' : String(variant).trim();
+    return 'p' + p.id + '\u0001' + v;
+  }
+  return 'p' + p.id;
+}
 function cartSub(){return cart.reduce(function(s,i){return s+i.prod.price*i.qty;},0);}
 function updBadge(){
   var n=cart.reduce(function(s,i){return s+i.qty;},0);
@@ -718,9 +1053,20 @@ function syncShowroomCartPlacement() {
   renderCart();
 }
 
-function addToCart(p,qty){
-  var k=cartKey(p),item=cart.find(function(i){return i.key===k;});
-  if(item){item.qty+=qty;}else{cart.push({key:k,prod:p,qty:qty});}
+function addToCart(p, qty, variant) {
+  if (productNeedsShowroomVariant(p)) {
+    var v = (variant == null) ? '' : String(variant).trim();
+    if (!v) {
+      toast(t('Please select a size.','অনুগ্রহ করে সাইজ বেছে নিন।'));
+      return;
+    }
+  } else {
+    variant = null;
+  }
+  var k = cartKey(p, variant);
+  var item = cart.find(function (i) { return i.key === k; });
+  if (item) { item.qty += qty; }
+  else { cart.push({ key: k, prod: p, qty: qty, variant: (productNeedsShowroomVariant(p) ? String(variant).trim() : null) }); }
   updBadge();
   refreshShowroomCartIfInline();
 }
@@ -776,6 +1122,45 @@ function renderDrawerImages(p) {
   });
 }
 
+function getDrawerSelectedVariant() {
+  var ch = document.querySelector('#drawer-var-wrap .showroom-var-chip.is-selected');
+  if (!ch) return '';
+  return String(ch.getAttribute('data-v') != null ? ch.getAttribute('data-v') : '').trim();
+}
+
+function setShowroomDrawerVarUI(p) {
+  var w = document.getElementById('drawer-var-wrap');
+  if (!w) return;
+  if (!isShowroom() || !p || !p.variations || !p.variations.length) {
+    w.style.display = 'none';
+    w.setAttribute('hidden', '');
+    w.innerHTML = '';
+    var atc0 = document.getElementById('btn-atc');
+    var bn0 = document.getElementById('btn-buy-now-drw');
+    var bad0 = !p || !p.inStock;
+    if (atc0) atc0.disabled = bad0;
+    if (bn0) bn0.disabled = bad0;
+    return;
+  }
+  w.removeAttribute('hidden');
+  w.style.display = '';
+  w.innerHTML = '<div class="dlabel" style="margin-bottom:6px">'
+    + '<span class="en">Size / option</span>'
+    + '<span class="bn">সাইজ / অপশন</span>'
+    + '</div>'
+    + showroomVarChipsGroupHtml(p, true);
+  bindShowroomDrawerChips();
+  syncShowroomDrawerVarButtons(p);
+}
+
+function syncShowroomDrawerVarButtons(p) {
+  var atc = document.getElementById('btn-atc');
+  var bnow = document.getElementById('btn-buy-now-drw');
+  var bad = !p || !p.inStock;
+  if (atc) atc.disabled = bad;
+  if (bnow) bnow.disabled = bad;
+}
+
 function openDrawer(pid){
   var p=PRODUCTS.find(function(x){return x.id===pid;}); if(!p) return;
   activeProd=p; activeQty=1;
@@ -797,6 +1182,7 @@ function openDrawer(pid){
   /* 2. Stars in drawer */
   document.getElementById('d-rating').innerHTML=starsHtml(p.rating||0)+' <span style="font-size:12px;color:var(--ink3)">('+p.reviews+' '+t('reviews','রিভিউ')+')</span>';
   document.getElementById('d-desc').textContent=p.desc||'';
+  setShowroomDrawerVarUI(p);
 
   /* 5. Bundle */
   bundleProds=[];
@@ -837,8 +1223,8 @@ function syncCartDeliveryToCheckout() {
     ['cart-dlv-name', 'co-name'],
     ['cart-dlv-phone', 'co-phone'],
     ['cart-dlv-addr', 'co-addr'],
-    ['cart-dlv-city', 'co-city'],
-    ['cart-dlv-area', 'co-area'],
+    ['cart-dlv-district', 'co-district'],
+    ['cart-dlv-upazila', 'co-upazila'],
     ['cart-dlv-note', 'co-note']
   ];
   pairs.forEach(function (pair) {
@@ -851,6 +1237,8 @@ function syncCartDeliveryToCheckout() {
       r.checked = r.value === cartPay.value;
     });
   }
+  mirrorDistrictUpazila('cart-dlv', 'co');
+  renderCart();
 }
 
 function syncCheckoutToCartDelivery() {
@@ -858,8 +1246,8 @@ function syncCheckoutToCartDelivery() {
     ['co-name', 'cart-dlv-name'],
     ['co-phone', 'cart-dlv-phone'],
     ['co-addr', 'cart-dlv-addr'],
-    ['co-city', 'cart-dlv-city'],
-    ['co-area', 'cart-dlv-area'],
+    ['co-district', 'cart-dlv-district'],
+    ['co-upazila', 'cart-dlv-upazila'],
     ['co-note', 'cart-dlv-note']
   ];
   pairs.forEach(function (pair) {
@@ -871,6 +1259,8 @@ function syncCheckoutToCartDelivery() {
     var match = document.querySelector('#cart-delivery-wrap input[name="cart-payment"][value="' + coPay.value + '"]');
     if (match) match.checked = true;
   }
+  mirrorDistrictUpazila('co', 'cart-dlv');
+  renderCart();
 }
 
 /* ── CART DRAWER (reference: product row = thumb | name + meta + price line + qty stepper | delete) ── */
@@ -904,7 +1294,7 @@ function renderCartShowroom(){
     var p=item.prod;
     var lineTotal=p.price*item.qty;
     var img=p.image_url?'<img src="'+escAttr(p.image_url)+'" alt="'+escAttr(p.name)+'">':'<div class="ci-thumb-em">'+(p.emoji||'🛍️')+'</div>';
-    var sizeBit=cartSizeFromName(p.name);
+    var sizeBit=item.variant||cartSizeFromName(p.name);
     var metaParts=[];
     if(sizeBit){metaParts.push('<span class="ci-meta-line">'+t('Size','সাইজ')+': '+escHtml(sizeBit)+'</span>');}
     if(p.original){metaParts.push('<span class="ci-meta-line">'+t('Original price','মূল মূল্য')+': '+taka(p.original)+'</span>');}
@@ -924,10 +1314,14 @@ function renderCartShowroom(){
     +'</div>';
   }).join('');
   var sub=cartSub();
+  var deliveryCharge = getSelectedDeliveryCharge('cart-dlv');
+  var grandTotal = sub + deliveryCharge;
   var elSub=document.getElementById('cf-sub');
   if(elSub) elSub.textContent=taka(sub);
+  var elDelivery=document.getElementById('cf-delivery');
+  if(elDelivery) elDelivery.textContent=taka(deliveryCharge);
   var elTot=document.getElementById('cf-total');
-  if(elTot) elTot.textContent=taka(sub);
+  if(elTot) elTot.textContent=taka(grandTotal);
   var cdw=si('cart-delivery-wrap');
   if(cdw) cdw.style.display=cart.length?'block':'none';
 }
@@ -980,7 +1374,8 @@ function openCheckout(){
   document.getElementById('co-lines').innerHTML=cart.map(function(item){
     var p=item.prod;
     var img=p.image_url?'<img src="'+p.image_url+'">':'<div class="ol-em">'+(p.emoji||'🛍️')+'</div>';
-    return '<div class="oline"><div class="ol-thumb">'+img+'</div><div class="ol-info"><div class="ol-name">'+p.name+'</div><div class="ol-sub">'+t('Qty','পরিমাণ')+': '+item.qty+'</div></div><div class="ol-price">'+taka(p.price*item.qty)+'</div></div>';
+    var nm=p.name+(item.variant?' <span class="ol-var">— '+item.variant+'</span>':'');
+    return '<div class="oline"><div class="ol-thumb">'+img+'</div><div class="ol-info"><div class="ol-name">'+nm+'</div><div class="ol-sub">'+t('Qty','পরিমাণ')+': '+item.qty+'</div></div><div class="ol-price">'+taka(p.price*item.qty)+'</div></div>';
   }).join('');
   var sub=cartSub();
   document.getElementById('co-sub').textContent=taka(sub);
@@ -1001,9 +1396,11 @@ function generateOrderId(){
 
 function logLinesFromCart(){
   return cart.map(function(item){
+    var nm = item.prod.name;
+    if (item.variant) nm = nm + ' — ' + item.variant;
     return{
       productId:item.prod.id,
-      productName:item.prod.name,
+      productName:nm,
       qty:item.qty,
       unitPrice:item.prod.price,
       lineTotal:item.prod.price*item.qty
@@ -1013,6 +1410,8 @@ function logLinesFromCart(){
 
 function postLogOrder(orderId, cust, payMethod){
   var sub=cartSub();
+  var deliveryCharge = Number(cust.deliveryCharge || 0);
+  var total = sub + deliveryCharge;
   var placedAt=new Date().toISOString();
   fetch('/api/log-order',{
     method:'POST',
@@ -1023,26 +1422,35 @@ function postLogOrder(orderId, cust, payMethod){
       customerName:cust.name,
       customerPhone:cust.phone,
       address:cust.addr,
-      city:cust.city,
-      area:cust.area,
+      city:cust.district,
+      area:cust.upazila,
       note:cust.note,
       payment:payMethod,
       orderSubtotal:sub,
+      deliveryCharge:deliveryCharge,
+      orderTotal:total,
       lines:logLinesFromCart()
     })
   }).catch(function(){});
-  return sub;
+  return { subtotal: sub, deliveryCharge: deliveryCharge, total: total };
 }
 
-function buildWhatsAppOrderText(cust, payMethod, sub){
-  var fullAddr=[cust.addr,cust.area,cust.city].filter(Boolean).join(', ');
+function buildWhatsAppOrderText(cust, payMethod, pricing){
+  var sub = pricing && pricing.subtotal ? pricing.subtotal : cartSub();
+  var deliveryCharge = pricing && pricing.deliveryCharge ? pricing.deliveryCharge : 0;
+  var total = pricing && pricing.total ? pricing.total : (sub + deliveryCharge);
+  var fullAddr=[cust.addr,cust.upazila,cust.district].filter(Boolean).join(', ');
   var lines=cart.map(function(item,i){
-    return (i+1)+'. '+item.prod.name+'\n   Qty: '+item.qty+' × '+taka(item.prod.price)+' = '+taka(item.prod.price*item.qty);
+    var lineName = item.prod.name + (item.variant ? ' (' + item.variant + ')' : '');
+    return (i+1)+'. '+lineName+'\n   Qty: '+item.qty+' × '+taka(item.prod.price)+' = '+taka(item.prod.price*item.qty);
   }).join('\n');
   return '🛒 *New Order — '+CFG.STORE_NAME+'*\n\n'
     +'👤 *Name:* '+cust.name+'\n📞 *Phone:* '+cust.phone+'\n📍 *Address:* '+fullAddr+'\n\n'
     +'*Order Items:*\n'+lines+'\n\n'
-    +'💰 *Estimated Total:* '+taka(sub)+'\n💳 *Payment:* '+(PAY_LABELS_ORDER[payMethod]||'Cash on Delivery')
+    +'🧾 *Subtotal:* '+taka(sub)+'\n'
+    +'🚚 *Delivery Charge:* '+taka(deliveryCharge)+'\n'
+    +'💰 *Estimated Total:* '+taka(total)+'\n'
+    +'💳 *Payment:* '+(PAY_LABELS_ORDER[payMethod]||'Cash on Delivery')
     +(cust.note?'\n\n📝 *Note:* '+cust.note:'');
 }
 
@@ -1062,8 +1470,8 @@ function validateShowroomDelivery(){
   var name=nameEl.value.trim();
   var phone=phoneEl.value.trim();
   var addr=addrEl.value.trim();
-  var city=(si('cart-dlv-city')&&si('cart-dlv-city').value.trim())||'';
-  var area=(si('cart-dlv-area')&&si('cart-dlv-area').value.trim())||'';
+  var district=(si('cart-dlv-district')&&si('cart-dlv-district').value.trim())||'';
+  var upazila=(si('cart-dlv-upazila')&&si('cart-dlv-upazila').value.trim())||'';
   var note=(si('cart-dlv-note')&&si('cart-dlv-note').value.trim())||'';
   if(!name){
     nameEl.focus();
@@ -1081,14 +1489,27 @@ function validateShowroomDelivery(){
     addrEl.focus();
     return { ok:false, msg:t('Please enter your delivery address.','ডেলিভারি ঠিকানা লিখুন।') };
   }
-  return { ok:true, name:name, phone:phone, addr:addr, city:city, area:area, note:note };
+  if(!district){
+    var districtEl=si('cart-dlv-district');
+    if(districtEl) districtEl.focus();
+    return { ok:false, msg:t('Please select your district.','আপনার জেলা সিলেক্ট করুন।') };
+  }
+  if(!upazila){
+    var upazilaEl=si('cart-dlv-upazila');
+    if(upazilaEl) upazilaEl.focus();
+    return { ok:false, msg:t('Please select your thana/upazila.','আপনার থানা/উপজেলা সিলেক্ট করুন।') };
+  }
+  return { ok:true, name:name, phone:phone, addr:addr, district:district, upazila:upazila, note:note, deliveryCharge:getSelectedDeliveryCharge('cart-dlv') };
 }
 
 function clearCartDeliveryFields(){
-  ['cart-dlv-name','cart-dlv-phone','cart-dlv-addr','cart-dlv-area','cart-dlv-note'].forEach(function(id){
+  ['cart-dlv-name','cart-dlv-phone','cart-dlv-addr','cart-dlv-note'].forEach(function(id){
     var el=si(id); if(el) el.value='';
   });
-  var c=si('cart-dlv-city'); if(c) c.value='Dhaka';
+  var districtEl=si('cart-dlv-district');
+  if(districtEl) districtEl.value='';
+  refreshUpazilaSelect('cart-dlv-upazila', '', '');
+  mirrorDistrictUpazila('cart-dlv', 'co');
   var codPay=document.querySelector('#cart-delivery-wrap input[name="cart-payment"][value="cod"]');
   if(codPay) codPay.checked=true;
 }
@@ -1132,13 +1553,13 @@ function checkoutFromShowroomCart(){
     toast(v.msg);
     return;
   }
-  var cust={ name:v.name, phone:v.phone, addr:v.addr, city:v.city, area:v.area, note:v.note };
+  var cust={ name:v.name, phone:v.phone, addr:v.addr, district:v.district, upazila:v.upazila, note:v.note, deliveryCharge:v.deliveryCharge };
   syncCartDeliveryToCheckout();
   var payEl=document.querySelector('#cart-delivery-wrap input[name="cart-payment"]:checked');
   var payMethod=payEl?payEl.value:'cod';
   var orderId=generateOrderId();
-  var sub=postLogOrder(orderId, cust, payMethod);
-  window.__showroomOrderWaText=buildWhatsAppOrderText(cust, payMethod, sub);
+  var pricing=postLogOrder(orderId, cust, payMethod);
+  window.__showroomOrderWaText=buildWhatsAppOrderText(cust, payMethod, pricing);
   cart=[]; updBadge(); renderCart();
   clearCartDeliveryFields();
   closeCart();
@@ -1162,8 +1583,12 @@ function placeOrder(){
     toast(t('Please enter a valid phone number (at least 10 digits).','সঠিক ফোন নম্বর দিন (কমপক্ষে ১০ ডিজিট)।'));
     return;
   }
-  var city=document.getElementById('co-city').value.trim();
-  var area=document.getElementById('co-area').value.trim();
+  var districtEl=si('co-district');
+  var upazilaEl=si('co-upazila');
+  var cityEl=si('co-city');
+  var areaEl=si('co-area');
+  var district=(districtEl&&districtEl.value.trim()) || (cityEl&&cityEl.value.trim()) || '';
+  var upazila=(upazilaEl&&upazilaEl.value.trim()) || (areaEl&&areaEl.value.trim()) || '';
   var note=document.getElementById('co-note').value.trim();
   var payEl=document.querySelector('input[name="payment"]:checked');
   var payMethod=payEl?payEl.value:'cod';
@@ -1171,10 +1596,10 @@ function placeOrder(){
     toast(t('Your cart is empty','কার্ট খালি'));
     return;
   }
-  var cust={ name:name, phone:phone, addr:addr, city:city, area:area, note:note };
+  var cust={ name:name, phone:phone, addr:addr, district:district, upazila:upazila, note:note, deliveryCharge:getSelectedDeliveryCharge('co') };
   var orderId=generateOrderId();
-  var sub=postLogOrder(orderId, cust, payMethod);
-  var msg=buildWhatsAppOrderText(cust, payMethod, sub);
+  var pricing=postLogOrder(orderId, cust, payMethod);
+  var msg=buildWhatsAppOrderText(cust, payMethod, pricing);
   window.open('https://wa.me/'+CFG.WHATSAPP+'?text='+encodeURIComponent(msg));
   cart=[]; updBadge(); renderCart(); closeCheckout();
   toast(t('Order sent! We\'ll confirm shortly 🎉','অর্ডার পাঠানো হয়েছে! 🎉'));
@@ -1206,6 +1631,14 @@ function rowToProduct(row, index) {
   if (badge === 'sale' && !original) badge = null;
   var images = normalizeProductImages(row);
 
+  var varRaw = (row.variations != null ? row.variations : row.variation);
+  varRaw = (varRaw != null ? varRaw : '').toString().trim();
+  var variations = varRaw
+    ? (varRaw.indexOf('|') >= 0 ? varRaw.split('|') : varRaw.split(','))
+        .map(function (x) { return x.trim(); })
+        .filter(Boolean)
+    : [];
+
   return {
     id:       parseInt(row.id, 10) || (index + 1),
     name:     (row.name || '').trim(),
@@ -1223,7 +1656,8 @@ function rowToProduct(row, index) {
     inStock:  inStock,
     stock:    isNaN(stockVal) ? 99 : stockVal,
     views:    parseInt(row.views, 10) || Math.floor(Math.random() * 80 + 10),
-    bundle:   bundle
+    bundle:   bundle,
+    variations: variations
   };
 }
 
@@ -1274,6 +1708,7 @@ function loadProducts() {
 function showGrid(){
   document.getElementById('lgrid').style.display='none';
   document.getElementById('pgrid').style.display='grid';
+  renderCatsBar();
   applyFilters();
   syncShowroomCartPlacement();
 }
@@ -1286,7 +1721,8 @@ function closestFrom(e,sel){
 }
 
 document.addEventListener('DOMContentLoaded',function(){
-  loadContext().then(function(){
+  initDistrictUpazilaData();
+  Promise.all([loadContext(), loadAssetBannerSlides()]).then(function(){
     if (isShowroom()) {
       lang = 'bn';
       document.body.classList.add('bn');
@@ -1311,6 +1747,32 @@ document.addEventListener('DOMContentLoaded',function(){
   });
 
   document.getElementById('pgrid').addEventListener('click',function(e){
+    var moreBtn=closestFrom(e,'.showroom-var-more');
+    if(moreBtn && closestFrom(e,'#pgrid .pcard')){
+      e.stopPropagation();
+      var morePid=parseInt(moreBtn.getAttribute('data-pid'),10);
+      if(!isNaN(morePid)) openDrawer(morePid);
+      return;
+    }
+    var vchip=closestFrom(e,'.showroom-var-chip');
+    if(vchip && vchip.getAttribute('data-v')!=null && vchip.getAttribute('data-v')!=='' && closestFrom(e,'#pgrid .pcard')){
+      e.stopPropagation();
+      var par=vchip.closest('.showroom-var-chips');
+      if(!par) return;
+      var pid=parseInt(par.getAttribute('data-pid'),10);
+      if(isNaN(pid)) return;
+      par.querySelectorAll('button.showroom-var-chip[data-v]').forEach(function(c){
+        c.classList.remove('is-selected');
+        c.setAttribute('aria-pressed','false');
+      });
+      vchip.classList.add('is-selected');
+      vchip.setAttribute('aria-pressed','true');
+      var rowHint=par.closest('.showroom-var-row');
+      if(rowHint) rowHint.classList.remove('showroom-var--hint','showroom-var--shake');
+      var cqv=document.getElementById('cqv-'+pid);
+      if(cqv) cqv.textContent=String(getCardQty(pid));
+      return;
+    }
     var buy=closestFrom(e,'.btn-buy-now');
     if(buy && buy.getAttribute('data-pid')){
       e.stopPropagation();
@@ -1324,8 +1786,14 @@ document.addEventListener('DOMContentLoaded',function(){
       var pid=parseInt(ab.getAttribute('data-pid'),10);
       var p=PRODUCTS.find(function(x){return x.id===pid;});
       if(!p||!p.inStock) return;
+      var v = getShowroomCardSelectedVariant(pid);
+      if (productNeedsShowroomVariant(p) && !v) {
+        flashShowroomVarRequiredForPid(pid);
+        toast(t('Please select a size.','অনুগ্রহ করে সাইজ বেছে নিন।'));
+        return;
+      }
       var qty=getCardQty(pid);
-      addToCart(p,qty);
+      addToCart(p, qty, v || undefined);
       /* show qty row permanently after adding */
       var qr=document.getElementById('cqr-'+pid);
       if(qr) qr.classList.add('show');
@@ -1340,15 +1808,37 @@ document.addEventListener('DOMContentLoaded',function(){
   document.getElementById('qplus').addEventListener('click',function(){activeQty++;updQtyUI();});
   document.getElementById('btn-atc').addEventListener('click',function(){
     if(!activeProd||!activeProd.inStock) return;
-    try{addToCart(activeProd,activeQty);toast(t('Added to cart! 🛒','কার্টে যোগ হয়েছে! 🛒'));}
-    finally{closeDrawer();}
+    var v = (productNeedsShowroomVariant(activeProd) ? getDrawerSelectedVariant() : '');
+    if (productNeedsShowroomVariant(activeProd) && !v) {
+      flashShowroomDrawerVarRequired();
+      toast(t('Please select a size.','অনুগ্রহ করে সাইজ বেছে নিন।'));
+      return;
+    }
+    addToCart(activeProd, activeQty, v || undefined);
+    toast(t('Added to cart! 🛒','কার্টে যোগ হয়েছে! 🛒'));
+    closeDrawer();
   });
   document.getElementById('btn-buy-now-drw').addEventListener('click',function(){
     if(!activeProd||!activeProd.inStock) return;
     var p=activeProd, q=activeQty;
+    if (productNeedsShowroomVariant(p) && !getDrawerSelectedVariant()) {
+      flashShowroomDrawerVarRequired();
+      toast(t('Please select a size.','অনুগ্রহ করে সাইজ বেছে নিন।'));
+      return;
+    }
+    var v = productNeedsShowroomVariant(p) ? getDrawerSelectedVariant() : null;
+    if (isShowroom()) {
+      addToCart(p, q, v || undefined);
+      closeDrawer();
+      openCart();
+      toast(t('Added to cart! 🛒','কার্টে যোগ হয়েছে! 🛒'));
+      return;
+    }
+    var drwV = productNeedsShowroomVariant(p) ? getDrawerSelectedVariant() : '';
     closeDrawer();
+    var sizeL = drwV ? ('\n' + t('Size', 'সাইজ') + ': *' + drwV + '*\n') : '';
     var msg='🛍️ *Quick Order — '+CFG.STORE_NAME+'*\n\n'
-      +'Product: *'+p.name+'*\n'
+      +'Product: *'+p.name+'*' + sizeL
       +'Quantity: '+q+'\n'
       +'Price: '+taka(p.price)+' × '+q+' = *'+taka(p.price*q)+'*\n\n'
       +'Please confirm my order and share delivery details. 🙏';
@@ -1356,7 +1846,19 @@ document.addEventListener('DOMContentLoaded',function(){
   });
   /* 5. Bundle add to cart */
   document.getElementById('btn-bundle').addEventListener('click',function(){
-    bundleProds.forEach(function(p){if(p.inStock) addToCart(p,1);});
+    var v0 = getDrawerSelectedVariant();
+    if (activeProd && productNeedsShowroomVariant(activeProd) && !v0) {
+      flashShowroomDrawerVarRequired();
+      toast(t('Please select a size.','অনুগ্রহ করে সাইজ বেছে নিন।'));
+      return;
+    }
+    bundleProds.forEach(function (p, i) {
+      if (!p.inStock) return;
+      if (i === 0 && activeProd && productNeedsShowroomVariant(activeProd)) addToCart(p, 1, v0);
+      else if (productNeedsShowroomVariant(p) && p.variations && p.variations.length) {
+        addToCart(p, 1, p.variations[0]);
+      } else addToCart(p, 1);
+    });
     toast(t('Bundle added to cart! 🛒','বান্ডেল কার্টে যোগ হয়েছে! 🛒'));
     closeDrawer();
   });
@@ -1383,4 +1885,9 @@ document.addEventListener('DOMContentLoaded',function(){
   document.getElementById('btn-wa-order').addEventListener('click', placeOrder);
   var btnWaInline = document.getElementById('btn-wa-order-inline');
   if (btnWaInline) btnWaInline.addEventListener('click', placeOrder);
+  ['cart-dlv-district', 'cart-dlv-upazila'].forEach(function (id) {
+    var el = si(id);
+    if (!el) return;
+    el.addEventListener('change', function () { renderCart(); });
+  });
 });

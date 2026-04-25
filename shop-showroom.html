@@ -81,13 +81,7 @@
 
 <div class="showroom-cats-outer">
   <div class="container showroom-cats-inner">
-    <div class="cats-wrap" id="cats-bar">
-      <button class="cat on" type="button" data-cat="all"><span class="en">All</span><span class="bn">সব</span></button>
-      <button class="cat" type="button" data-cat="clothing"><span class="en">Clothing</span><span class="bn">পোশাক</span></button>
-      <button class="cat" type="button" data-cat="footwear"><span class="en">Footwear</span><span class="bn">জুতা</span></button>
-      <button class="cat" type="button" data-cat="accessories"><span class="en">Accessories</span><span class="bn">আনুষাঙ্গিক</span></button>
-      <button class="cat" type="button" data-cat="electronics"><span class="en">Electronics</span><span class="bn">ইলেকট্রনিক্স</span></button>
-    </div>
+    <div class="cats-wrap" id="cats-bar"></div>
   </div>
 </div>
 
@@ -144,6 +138,7 @@
     </div>
     <div class="drating" id="d-rating"></div>
     <div class="ddesc" id="d-desc"></div>
+    <div id="drawer-var-wrap" class="showroom-var-drawer" style="display:none" hidden></div>
     <div class="bundle-box" id="d-bundle" style="display:none">
       <div class="bundle-title en">Frequently Bought Together</div>
       <div class="bundle-title bn">একসাথে কেনা হয়</div>
@@ -168,8 +163,7 @@
     </div>
     <button class="btn-atc" type="button" id="btn-atc"><span class="en">Add to Cart</span><span class="bn">কার্টে যোগ করুন</span></button>
     <button class="btn-buy-now-drw" type="button" id="btn-buy-now-drw">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413z"/></svg>
-      <span class="en">Buy Now via WhatsApp</span><span class="bn">এখনই WhatsApp-এ কিনুন</span>
+      <span class="en">Buy now</span><span class="bn">এখনই কিনুন</span>
     </button>
   </div>
 </div>
@@ -192,19 +186,19 @@
         <label for="cart-dlv-phone"><span class="en">Phone *</span><span class="bn">ফোন *</span></label>
         <input type="tel" id="cart-dlv-phone" autocomplete="tel" placeholder="">
       </div>
-      <div class="cart-dlv-field">
-        <label for="cart-dlv-addr"><span class="en">Delivery address *</span><span class="bn">ডেলিভারি ঠিকানা *</span></label>
-        <textarea id="cart-dlv-addr" rows="2" autocomplete="street-address" placeholder=""></textarea>
-      </div>
       <div class="cart-dlv-row">
         <div class="cart-dlv-field">
-          <label for="cart-dlv-city"><span class="en">City</span><span class="bn">শহর</span></label>
-          <input type="text" id="cart-dlv-city" autocomplete="address-level2" value="Dhaka">
+          <label for="cart-dlv-district"><span class="en">District *</span><span class="bn">জেলা সিলেক্ট করুন *</span></label>
+          <select id="cart-dlv-district" autocomplete="address-level2"></select>
         </div>
         <div class="cart-dlv-field">
-          <label for="cart-dlv-area"><span class="en">Thana / area</span><span class="bn">থানা / এলাকা</span></label>
-          <input type="text" id="cart-dlv-area" placeholder="">
+          <label for="cart-dlv-upazila"><span class="en">Thana / upazila *</span><span class="bn">থানা / উপজেলা *</span></label>
+          <select id="cart-dlv-upazila" autocomplete="address-level3"></select>
         </div>
+      </div>
+      <div class="cart-dlv-field">
+        <label for="cart-dlv-addr"><span class="en">Delivery address *</span><span class="bn">সম্পূর্ণ ঠিকানা *</span></label>
+        <textarea id="cart-dlv-addr" rows="2" autocomplete="street-address" placeholder=""></textarea>
       </div>
       <div class="cart-dlv-field">
         <label for="cart-dlv-note"><span class="en">Note for seller</span><span class="bn">বিক্রেতার জন্য নোট</span></label>
@@ -240,6 +234,14 @@
       <span><span class="en">Subtotal:</span><span class="bn">সাবটোটাল:</span></span>
       <span class="csum-subtotal-val" id="cf-sub">৳0</span>
     </div>
+    <div class="csum-row">
+      <span><span class="en">Delivery charge:</span><span class="bn">ডেলিভারি চার্জ:</span></span>
+      <span id="cf-delivery">৳0</span>
+    </div>
+    <div class="csum-row csum-total-line">
+      <span><span class="en">Estimated total:</span><span class="bn">আনুমানিক মোট:</span></span>
+      <span id="cf-total">৳0</span>
+    </div>
     <button type="button" class="btn-checkout" id="btn-to-checkout">
       <span class="en">Checkout</span><span class="bn">চেকআউট</span>
     </button>
@@ -257,11 +259,11 @@
       <div class="fgrp">
         <div class="field"><label><span class="en">Full Name *</span><span class="bn">পুরো নাম *</span></label><input type="text" id="co-name" placeholder="e.g. Rahim Uddin" autocomplete="name"></div>
         <div class="field"><label><span class="en">Phone Number *</span><span class="bn">ফোন নম্বর *</span></label><input type="tel" id="co-phone" placeholder="01711 234 567" autocomplete="tel"></div>
-        <div class="field"><label><span class="en">Delivery Address *</span><span class="bn">ডেলিভারি ঠিকানা *</span></label><textarea id="co-addr" placeholder="House, Road, Area, Thana, District" autocomplete="street-address"></textarea></div>
         <div class="fgrp fgrp2">
-          <div class="field"><label><span class="en">City</span><span class="bn">শহর</span></label><input type="text" id="co-city" value="Dhaka" autocomplete="address-level2"></div>
-          <div class="field"><label><span class="en">Thana / Area</span><span class="bn">থানা / এলাকা</span></label><input type="text" id="co-area" placeholder="Mirpur-10"></div>
+          <div class="field"><label><span class="en">District *</span><span class="bn">জেলা সিলেক্ট করুন *</span></label><select id="co-district" autocomplete="address-level2"></select></div>
+          <div class="field"><label><span class="en">Thana / upazila *</span><span class="bn">থানা / উপজেলা *</span></label><select id="co-upazila" autocomplete="address-level3"></select></div>
         </div>
+        <div class="field"><label><span class="en">Delivery Address *</span><span class="bn">সম্পূর্ণ ঠিকানা *</span></label><textarea id="co-addr" placeholder="রোড নাম/নাম্বার, বাড়ি নাম/নাম্বার, ফ্ল্যাট নাম্বার" autocomplete="street-address"></textarea></div>
         <div class="field"><label><span class="en">Note for Seller</span><span class="bn">বিক্রেতার জন্য নোট</span></label><input type="text" id="co-note" placeholder="Colour, size note, gate instructions…"></div>
       </div>
     </div>

@@ -5,10 +5,12 @@
   /** "csv" | "google_sheets" | "google_apps_script" — from GET /api/admin/orders */
   var ordersSource = 'csv';
   var ordersCanMutate = true;
+  var deliveryMap = null;
+  var deliveryDistricts = [];
   var productRows = [];
   var PRODUCT_FIELDS = [
     'id', 'name', 'price', 'original_price', 'category', 'emoji', 'image_urls', 'desc',
-    'rating', 'reviews', 'badge', 'in_stock', 'stock', 'views', 'bundle'
+    'rating', 'reviews', 'badge', 'in_stock', 'stock', 'views', 'bundle', 'variations'
   ];
 
   function $(id) { return document.getElementById(id); }
@@ -35,6 +37,197 @@
   }
   function arrToLines(a) {
     return (a || []).join('\n');
+  }
+
+  function toNonNegativeNumber(v) {
+    var n = Number(v);
+    return isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  function loadDeliveryMap() {
+    return fetch('data/bangladesh_districts_upazilas_map.json?cb=' + Date.now(), {
+      cache: 'no-store',
+      credentials: 'include'
+    })
+      .then(function (r) {
+        if (r.status === 401) {
+          showLoginScreen();
+          showMsg('Session expired — sign in again.', false);
+          throw new Error('Unauthorized');
+        }
+        if (!r.ok) throw new Error('Could not load delivery map (' + r.status + ')');
+        return r.json();
+      })
+      .then(function (data) {
+        deliveryMap = data || {};
+        var list = [];
+        (deliveryMap.divisions || []).forEach(function (div) {
+          (div.districts || []).forEach(function (d) {
+            var name = d && d.district != null ? String(d.district).trim() : '';
+            if (!name) return;
+            list.push({ name: name, ref: d });
+          });
+        });
+        list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        deliveryDistricts = list;
+        $('dc-base-charge').value = String(toNonNegativeNumber(deliveryMap.delivery_charge));
+        renderDeliveryRules();
+      });
+  }
+
+  function saveDeliveryMap() {
+    if (!deliveryMap) throw new Error('Delivery rules are not loaded.');
+    return fetch('/api/save-delivery-map', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(deliveryMap)
+    }).then(function (r) {
+      if (r.status === 401) {
+        showLoginScreen();
+        showMsg('Session expired — sign in again.', false);
+        throw new Error('Unauthorized');
+      }
+      return r.json().then(function (j) {
+        if (!r.ok || !j.ok) throw new Error((j && j.error) || String(r.status));
+        return j;
+      });
+    });
+  }
+
+  function districtSelectHtml(selected) {
+    var opts = ['<option value="">Select district</option>'];
+    deliveryDistricts.forEach(function (d) {
+      var sel = d.name === selected ? ' selected' : '';
+      opts.push('<option value="' + d.name.replace(/"/g, '&quot;') + '"' + sel + '>' + d.name + '</option>');
+    });
+    return opts.join('');
+  }
+
+  function renderDeliveryRules() {
+    var host = $('dc-rules');
+    if (!host) return;
+    if (!deliveryDistricts.length) {
+      host.innerHTML = '<p class="hint">No districts found in map file.</p>';
+      return;
+    }
+    var withCharge = deliveryDistricts.filter(function (d) {
+      return toNonNegativeNumber(d.ref.delivery_charge) > 0;
+    });
+    if (!withCharge.length) {
+      host.innerHTML = '';
+      return;
+    }
+    host.innerHTML = withCharge.map(function (d, idx) {
+      return '' +
+        '<div class="dc-rule" data-rule-idx="' + idx + '">' +
+          '<div class="fgrid fgrid2">' +
+            '<div>' +
+              '<label class="small">District</label>' +
+              '<select class="dc-district">' + districtSelectHtml(d.name) + '</select>' +
+            '</div>' +
+            '<div class="dc-rule-actions">' +
+              '<div style="flex:1">' +
+                '<label class="small">Delivery charge</label>' +
+                '<input type="number" class="dc-charge" min="0" step="1" value="' + toNonNegativeNumber(d.ref.delivery_charge) + '" />' +
+              '</div>' +
+              '<button type="button" class="btn btn-primary dc-confirm">Confirm</button>' +
+              '<button type="button" class="btn btn-ghost dc-remove">Remove</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }).join('');
+    bindDeliveryRuleButtons();
+  }
+
+  function findDistrictByName(name) {
+    var key = String(name || '').trim();
+    for (var i = 0; i < deliveryDistricts.length; i++) {
+      if (deliveryDistricts[i].name === key) return deliveryDistricts[i].ref;
+    }
+    return null;
+  }
+
+  function addDeliveryRuleBlock() {
+    var host = $('dc-rules');
+    if (!host) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'dc-rule';
+    wrap.innerHTML = '' +
+      '<div class="fgrid fgrid2">' +
+        '<div>' +
+          '<label class="small">District</label>' +
+          '<select class="dc-district">' + districtSelectHtml('') + '</select>' +
+        '</div>' +
+        '<div class="dc-rule-actions">' +
+          '<div style="flex:1">' +
+            '<label class="small">Delivery charge</label>' +
+            '<input type="number" class="dc-charge" min="0" step="1" value="0" />' +
+          '</div>' +
+          '<button type="button" class="btn btn-primary dc-confirm">Confirm</button>' +
+          '<button type="button" class="btn btn-ghost dc-remove">Remove</button>' +
+        '</div>' +
+      '</div>';
+    host.appendChild(wrap);
+    bindDeliveryRuleButtons();
+  }
+
+  function bindDeliveryRuleButtons() {
+    document.querySelectorAll('#dc-rules .dc-confirm').forEach(function (btn) {
+      btn.onclick = function () {
+        if (!deliveryMap) return;
+        var row = btn.closest('.dc-rule');
+        var district = row.querySelector('.dc-district').value;
+        var chargeVal = toNonNegativeNumber(row.querySelector('.dc-charge').value);
+        if (!district) {
+          showMsg('Select a district first.', false);
+          return;
+        }
+        var ref = findDistrictByName(district);
+        if (!ref) {
+          showMsg('District not found in map.', false);
+          return;
+        }
+        ref.delivery_charge = chargeVal;
+        saveDeliveryMap()
+          .then(function () {
+            showMsg('District delivery rule saved.', true);
+            return loadDeliveryMap();
+          })
+          .catch(function (e) {
+            if (String(e.message) !== 'Unauthorized') {
+              showMsg('Save failed: ' + (e && e.message ? e.message : e), false);
+            }
+          });
+      };
+    });
+    document.querySelectorAll('#dc-rules .dc-remove').forEach(function (btn) {
+      btn.onclick = function () {
+        if (!deliveryMap) return;
+        var row = btn.closest('.dc-rule');
+        var district = row.querySelector('.dc-district').value;
+        if (!district) {
+          row.remove();
+          return;
+        }
+        var ref = findDistrictByName(district);
+        if (ref && Object.prototype.hasOwnProperty.call(ref, 'delivery_charge')) {
+          delete ref.delivery_charge;
+          saveDeliveryMap()
+            .then(function () {
+              showMsg('District rule removed.', true);
+              return loadDeliveryMap();
+            })
+            .catch(function (e) {
+              if (String(e.message) !== 'Unauthorized') {
+                showMsg('Save failed: ' + (e && e.message ? e.message : e), false);
+              }
+            });
+          return;
+        }
+        row.remove();
+      };
+    });
   }
 
   function trustHtml(i) {
@@ -339,10 +532,11 @@
     return (arr || []).map(function (s) { return String(s || '').trim(); }).filter(Boolean).join(', ');
   }
 
-  function uploadProductImage(file, onDone) {
+  function uploadProductImage(file, productName, onDone) {
     if (!file) return;
     var fd = new FormData();
     fd.append('file', file, file.name || 'upload');
+    fd.append('productName', String(productName || '').trim());
     fetch('/api/admin/upload-product-image', { method: 'POST', body: fd, credentials: 'include' })
       .then(function (r) {
         if (r.status === 401) {
@@ -480,7 +674,9 @@
           });
           fileInpList.addEventListener('change', function () {
             if (!fileInpList.files || !fileInpList.files[0]) return;
-            uploadProductImage(fileInpList.files[0], function (p) {
+            var nameInput = tr.querySelector('[data-f="name"]');
+            var currentProductName = nameInput ? String(nameInput.value || '').trim() : '';
+            uploadProductImage(fileInpList.files[0], currentProductName, function (p) {
               addImageUrl(p);
             });
             fileInpList.value = '';
@@ -628,6 +824,32 @@
           showMsg('Save failed: ' + (e && e.message ? e.message : e), false);
         }
       });
+  });
+
+  $('btn-save-base-charge').addEventListener('click', function () {
+    if (!deliveryMap) {
+      showMsg('Delivery map is not loaded yet.', false);
+      return;
+    }
+    deliveryMap.delivery_charge = toNonNegativeNumber($('dc-base-charge').value);
+    saveDeliveryMap()
+      .then(function () {
+        showMsg('Base delivery rule saved.', true);
+        return loadDeliveryMap();
+      })
+      .catch(function (e) {
+        if (String(e.message) !== 'Unauthorized') {
+          showMsg('Save failed: ' + (e && e.message ? e.message : e), false);
+        }
+      });
+  });
+
+  $('btn-add-district-rule').addEventListener('click', function () {
+    if (!deliveryMap) {
+      showMsg('Delivery map is not loaded yet.', false);
+      return;
+    }
+    addDeliveryRuleBlock();
   });
 
   /* Orders */
@@ -929,6 +1151,7 @@
   function startAdminData() {
     loadContext()
       .then(loadProducts)
+      .then(loadDeliveryMap)
       .catch(function (e) {
         showMsg('Load error: ' + (e && e.message ? e.message : e), false);
       });

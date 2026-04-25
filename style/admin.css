@@ -131,6 +131,19 @@ table.orders .orders-items { font-size: 11px; color: var(--ink2); max-width: 360
 .raw-json.on { display: block; }
 .raw-json textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 200px; }
 
+.dc-rule {
+  border: 1px dashed var(--rule);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.dc-rule-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
 .login-screen {
   min-height: 100vh; display: flex; align-items: center; justify-content: center;
   padding: 24px 16px; background: var(--bg);

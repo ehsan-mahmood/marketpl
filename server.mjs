@@ -18,15 +18,18 @@ const PORT = Number(process.env.PORT) || 8787;
 const DATA_DIR = path.join(__dirname, 'data');
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const PRODUCTS_UPLOAD_DIR = path.join(ASSETS_DIR, 'products');
+const BANNERS_DIR = path.join(ASSETS_DIR, 'banners');
 const MAX_PRODUCT_IMAGE_BYTES = 6 * 1024 * 1024;
 const CONTEXT_PATH = path.join(DATA_DIR, 'context.json');
 const PRODUCTS_PATH = path.join(DATA_DIR, 'products.csv');
 const ORDERS_PATH = path.join(DATA_DIR, 'orders.csv');
+const DISTRICT_MAP_PATH = path.join(DATA_DIR, 'bangladesh_districts_upazilas_map.json');
 
 function ensureDataDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
   if (!fs.existsSync(PRODUCTS_UPLOAD_DIR)) fs.mkdirSync(PRODUCTS_UPLOAD_DIR, { recursive: true });
+  if (!fs.existsSync(BANNERS_DIR)) fs.mkdirSync(BANNERS_DIR, { recursive: true });
 }
 
 const AUTH_FILENAME = 'admin-auth.json';
@@ -163,6 +166,22 @@ function saveAuth(auth) {
   // Always write to file (for change-password during a running session).
   // On next redeploy, env vars will take over again if set.
   fs.writeFileSync(AUTH_PATH, JSON.stringify(auth, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * When admin saves context.json, keep login phone in admin-auth.json in sync with
+ * the WhatsApp field (so "vendor phone" login matches the store number).
+ * Skipped when ADMIN_PHONE (etc.) is set — env is the source of truth on deploy.
+ */
+function syncAuthPhoneFromSavedContext(res, ctxObj) {
+  if (loadAuthFromEnv()) return;
+  const newDigits = normPhone(ctxObj && ctxObj.whatsapp);
+  if (!newDigits) return;
+  const auth = loadAuth();
+  if (auth.phoneDigits === newDigits) return;
+  auth.phoneDigits = newDigits;
+  saveAuth(auth);
+  if (res) setSessionCookie(res, newDigits);
 }
 
 function devKeyValid(key) {
@@ -345,6 +364,61 @@ function parseMultipartFirstFile(buf, contentType) {
     return { filename, buffer: body, mime };
   }
   return null;
+}
+
+function parseMultipartTextField(buf, contentType, fieldName) {
+  const m = /boundary=([^;]+)/i.exec(contentType || '');
+  if (!m) return '';
+  const wanted = String(fieldName || '').trim();
+  if (!wanted) return '';
+  let b = m[1].trim().replace(/^["']|["']$/g, '');
+  const boundaryBuf = Buffer.from('--' + b, 'utf8');
+  let start = 0;
+  while (start < buf.length) {
+    const idx = buf.indexOf(boundaryBuf, start);
+    if (idx === -1) break;
+    start = idx + boundaryBuf.length;
+    if (start < buf.length && buf[start] === 0x0d && buf[start + 1] === 0x0a) start += 2;
+    else if (start < buf.length && buf[start] === 0x0a) start += 1;
+    let next = buf.indexOf(boundaryBuf, start);
+    if (next === -1) next = buf.length;
+    const part = buf.subarray(start, next);
+    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+    if (headerEnd === -1) {
+      start = next;
+      continue;
+    }
+    const headerStr = part.subarray(0, headerEnd).toString('utf8');
+    if (/filename=/i.test(headerStr)) {
+      start = next;
+      continue;
+    }
+    const nameMatch = /name="([^"]+)"/i.exec(headerStr);
+    const name = nameMatch ? String(nameMatch[1] || '').trim() : '';
+    if (name !== wanted) {
+      start = next;
+      continue;
+    }
+    let body = part.subarray(headerEnd + 4);
+    if (body.length >= 2 && body[body.length - 2] === 0x0d && body[body.length - 1] === 0x0a) {
+      body = body.subarray(0, body.length - 2);
+    } else if (body.length >= 1 && body[body.length - 1] === 0x0a) {
+      body = body.subarray(0, body.length - 1);
+    }
+    return body.toString('utf8').trim();
+  }
+  return '';
+}
+
+function safeProductFolderName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return 'unnamed-product';
+  return raw
+    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+$/, '')
+    .trim()
+    .slice(0, 80) || 'unnamed-product';
 }
 
 function extFromProductImageMime(mime) {
@@ -1605,6 +1679,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/api/banners') {
+    try {
+      ensureDataDirs();
+      const entries = fs.existsSync(BANNERS_DIR) ? fs.readdirSync(BANNERS_DIR, { withFileTypes: true }) : [];
+      const okExt = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);
+      const files = entries
+        .filter((d) => d && d.isFile && d.isFile())
+        .map((d) => d.name)
+        .filter((name) => okExt.has(path.extname(String(name || '')).toLowerCase()))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+        .map((name) => normalizeWebPath(path.join('assets', 'banners', name)));
+      return json(res, 200, { ok: true, slides: files });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  }
+
   /* ── Protected saves ── */
   if (req.method === 'POST' && pathname === '/api/save-context') {
     if (!requireAdmin(req, res)) return;
@@ -1612,6 +1703,7 @@ const server = http.createServer(async (req, res) => {
       const raw = await readBody(req);
       const obj = JSON.parse(raw);
       await writeFileResilient(CONTEXT_PATH, JSON.stringify(obj, null, 2) + '\n');
+      syncAuthPhoneFromSavedContext(res, obj);
       return json(res, 200, { ok: true });
     } catch (e) {
       return json(res, 400, { ok: false, error: String(e && e.message ? e.message : e) });
@@ -1647,6 +1739,20 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'POST' && pathname === '/api/save-delivery-map') {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const raw = await readBody(req);
+      const obj = JSON.parse(raw || '{}');
+      if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON payload');
+      if (!Array.isArray(obj.divisions)) throw new Error('Map JSON must include divisions[]');
+      await writeFileResilient(DISTRICT_MAP_PATH, JSON.stringify(obj, null, 2) + '\n');
+      return json(res, 200, { ok: true });
+    } catch (e) {
+      return json(res, 400, { ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  }
+
   if (req.method === 'POST' && pathname === '/api/admin/upload-product-image') {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1662,6 +1768,8 @@ const server = http.createServer(async (req, res) => {
       if (!parsed || !parsed.buffer.length) {
         return json(res, 400, { ok: false, error: 'No file in upload' });
       }
+      const productName = parseMultipartTextField(buf, req.headers['content-type'] || ct, 'productName');
+      const productFolder = safeProductFolderName(productName);
       let ext = path.extname(parsed.filename).toLowerCase();
       if (ext === '.jpeg') ext = '.jpg';
       if (!PRODUCT_IMAGE_EXT.has(ext)) ext = extFromProductImageMime(parsed.mime);
@@ -1679,7 +1787,9 @@ const server = http.createServer(async (req, res) => {
       const stamp = Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
       const outName = (base || 'product') + '-' + stamp + ext;
       ensureDataDirs();
-      const abs = path.join(PRODUCTS_UPLOAD_DIR, outName);
+      const targetDir = path.join(PRODUCTS_UPLOAD_DIR, productFolder);
+      if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+      const abs = path.join(targetDir, outName);
       await writeBufferFileResilient(abs, parsed.buffer);
       const rel = normalizeWebPath(path.relative(__dirname, abs));
       return json(res, 200, { ok: true, path: rel });
@@ -1690,7 +1800,19 @@ const server = http.createServer(async (req, res) => {
 
   /* ── Static files ── */
   let filePathname = pathname;
-  if (filePathname === '/') filePathname = '/shop.html';
+  // Short URLs (no .html)
+  const pageAlias = {
+    '/admin': '/admin.html',
+    '/admin/': '/admin.html',
+    '/shop1': '/shop.html',
+    '/shop1/': '/shop.html',
+    '/shop2': '/shop-showroom.html',
+    '/shop2/': '/shop-showroom.html'
+  };
+  if (pageAlias[filePathname]) {
+    filePathname = pageAlias[filePathname];
+  }
+  if (filePathname === '/') filePathname = '/shop-showroom.html';
 
   const filePath = safeFilePath(filePathname);
   if (!filePath) {
@@ -1732,15 +1854,15 @@ server.listen(PORT, '0.0.0.0', () => {
   const isCloud = process.env.RENDER || process.env.RAILWAY || process.env.FLY_APP_NAME;
   if (isCloud) {
     console.log(`Server running on port ${PORT}`);
-    console.log('Shop:  /shop.html   Admin: /admin.html');
+    console.log('  /shop1 → shop.html   /shop2 → shop-showroom.html   /admin → admin.html');
   } else {
-    console.log(`This PC:  http://127.0.0.1:${PORT}/shop-showroom.html`);
-    console.log(`Admin:      http://127.0.0.1:${PORT}/admin.html`);
+    console.log(`This PC:  http://127.0.0.1:${PORT}/shop2  (showroom)   http://127.0.0.1:${PORT}/shop1  (classic)`);
+    console.log(`Admin:      http://127.0.0.1:${PORT}/admin`);
     const ips = ipv4LANAddresses();
     if (ips.length) {
       console.log('Same Wi\u2011Fi / LAN (use from phones & other PCs):');
       ips.forEach(function (ip) {
-        console.log(`  http://${ip}:${PORT}/shop-showroom.html  |  admin: http://${ip}:${PORT}/admin.html`);
+        console.log(`  http://${ip}:${PORT}/shop2  |  admin: http://${ip}:${PORT}/admin`);
       });
     } else {
       console.log('(No non-local IPv4 found \u2014 check Wi\u2011Fi/Ethernet.)');
