@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Seller dashboard — Joss Finds</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link rel="stylesheet" href="style/seller.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen" class="login-screen">
+  <div class="login-hero">
+    <svg class="login-geo" width="160" height="160" viewBox="0 0 160 160" aria-hidden="true">
+      <circle cx="130" cy="30" r="60" fill="none" stroke="white" stroke-width="0.8"/>
+      <circle cx="130" cy="30" r="40" fill="none" stroke="white" stroke-width="0.8"/>
+      <circle cx="130" cy="30" r="20" fill="none" stroke="white" stroke-width="0.8"/>
+      <line x1="30" y1="0" x2="160" y2="130" stroke="white" stroke-width="0.5"/>
+      <line x1="0" y1="60" x2="160" y2="60" stroke="white" stroke-width="0.5"/>
+    </svg>
+    <div class="login-eyebrow">
+      <span class="login-dot" aria-hidden="true"></span>
+      seller dashboard
+    </div>
+    <h1 class="login-headline">আপনার দোকান,<br>আপনার নিয়ন্ত্রণ</h1>
+    <p class="login-sub">Your store, your control. Manage orders, products, and sales — all in one place.</p>
+    <div class="login-stats">
+      <div class="ls-card">
+        <div class="ls-num">৳2.4L</div>
+        <div class="ls-label">avg monthly GMV</div>
+      </div>
+      <div class="ls-card">
+        <div class="ls-num">4,200+</div>
+        <div class="ls-label">active sellers</div>
+      </div>
+    </div>
+  </div>
+  <div class="login-form card-elevated">
+    <h2 class="login-form-title">Sign in to your store</h2>
+    <p class="hint" id="login-hint">Use your vendor phone number (digits only) and password.</p>
+    <div class="field-wrap">
+      <label class="field-label" for="login-phone">Phone</label>
+      <input class="field-input" type="tel" id="login-phone" inputmode="numeric" autocomplete="username" placeholder="e.g. 8801XXXXXXXXX" />
+    </div>
+    <div class="field-wrap">
+      <label class="field-label" for="login-pass">Password</label>
+      <input class="field-input" type="password" id="login-pass" autocomplete="current-password" />
+    </div>
+    <button type="button" class="login-btn" id="btn-login">Sign in →</button>
+    <p class="msg login-msg" id="login-msg" role="status"></p>
+    <p class="login-footer">Cash on delivery · bKash · Nagad</p>
+  </div>
+</div>
+
+<!-- SELLER APP -->
+<div id="seller-app" class="seller-app" style="display:none">
+  <div class="seller-layout">
+    <!-- HEADER (fixed) -->
+    <header class="app-header" role="banner">
+      <div class="ah-left">
+        <div class="ah-greeting" id="seller-greeting">Good morning</div>
+        <div class="ah-store" id="seller-store-name">Your store</div>
+      </div>
+      <a class="notif-btn" href="shop-showroom.html" target="_blank" rel="noopener" title="Open shop" aria-label="Open shop in new tab">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M3 10h18l-1.2 9a2 2 0 0 1-2 1.8H6.2a2 2 0 0 1-2-1.8L3 10Z"/>
+          <path d="M7 10V7a5 5 0 0 1 10 0v3"/>
+        </svg>
+        <span class="notif-pip" id="seller-notif-pip" hidden></span>
+      </a>
+    </header>
+    <span class="msg seller-msg" id="msg" role="status"></span>
+
+    <!-- ORDERS TAB -->
+    <div class="panel on" id="p-orders">
+      <div class="ticker" role="status" aria-live="polite">
+        <span class="ticker-dot" aria-hidden="true"></span>
+        <span class="ticker-text" id="seller-ticker-text">Loading orders…</span>
+      </div>
+      <div class="stat-strip" id="seller-stat-strip" aria-label="Order summary">
+        <div class="stat-card">
+          <div class="stat-num amber" id="seller-stat-need">0</div>
+          <div class="stat-lbl">Total orders</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num teal" id="seller-stat-rev">৳0</div>
+          <div class="stat-lbl">Today's revenue</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num blue" id="seller-stat-desp">0</div>
+          <div class="stat-lbl">Website visits today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num teal" id="seller-stat-del">0</div>
+          <div class="stat-lbl">Delivered</div>
+        </div>
+      </div>
+      <div class="pills" id="order-filter-pills" role="tablist" aria-label="Filter orders by status">
+        <button type="button" class="pill on" data-filter="all" role="tab" aria-pressed="true">All orders</button>
+        <button type="button" class="pill amber-pill" id="order-pill-new" data-filter="new" role="tab" aria-pressed="false">New</button>
+        <button type="button" class="pill" data-filter="confirmed" role="tab" aria-pressed="false">Confirmed</button>
+        <button type="button" class="pill" data-filter="despatched" role="tab" aria-pressed="false">Despatched</button>
+      </div>
+      <div class="orders-toolbar">
+        <input
+          type="search"
+          id="orders-search"
+          class="orders-search"
+          placeholder="Search phone, address, product…"
+          aria-label="Search orders by phone, address or product"
+          autocomplete="off"
+        />
+        <span class="hint" id="orders-count"></span>
+        <button type="button" class="btn-icon" id="btn-orders-refresh" title="Refresh orders" aria-label="Refresh orders">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"/>
+          </svg>
+        </button>
+      </div>
+      <div id="orders-list" class="orders-list"></div>
+    </div>
+
+    <!-- PRODUCTS TAB -->
+    <div class="panel" id="p-products">
+      <div class="prod-panel-head">
+        <h2 class="section-title">Products <span class="hint-inline" id="prod-count"></span></h2>
+        <div class="prod-head-actions">
+          <button type="button" class="btn-icon" id="btn-reload-products" title="Refresh products" aria-label="Refresh products">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"/>
+            </svg>
+          </button>
+          <button type="button" class="btn-primary-s" id="btn-add-product-card">+ Add</button>
+        </div>
+      </div>
+      <div class="products-toolbar">
+        <input
+          type="search"
+          id="products-search"
+          class="products-search"
+          placeholder="Search product name, category, variation…"
+          aria-label="Search products"
+          autocomplete="off"
+        />
+        <select id="products-category-filter" class="products-category-filter" aria-label="Filter products by category">
+          <option value="all">All categories</option>
+        </select>
+      </div>
+      <p class="hint sheets-notice" id="products-sheets-notice" style="display:none">Catalog is read from your Google Sheet. Edit the spreadsheet, then <strong>Refresh</strong>. Saving is disabled in this mode.</p>
+      <div id="product-cards-list" class="product-cards-list"></div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div class="panel" id="p-context">
+      <h2 class="section-title" style="margin-bottom:12px">Settings</h2>
+
+      <div class="sg">
+        <div class="sg-hdr">Account</div>
+        <button type="button" class="sg-row" data-setting="password">
+          <span class="sg-row-lbl">Change password</span>
+          <span class="sg-row-val">→</span>
+        </button>
+        <button type="button" class="sg-row" id="btn-logout-row">
+          <span class="sg-row-lbl" style="color:#A32D2D">Log out</span>
+        </button>
+      </div>
+
+      <div class="sg">
+        <div class="sg-hdr">Store</div>
+        <button type="button" class="sg-row" data-setting="store-name">
+          <span class="sg-row-lbl">Store name</span>
+          <span class="sg-row-val" id="setting-preview-store-name">Joss Finds →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="whatsapp">
+          <span class="sg-row-lbl">WhatsApp number</span>
+          <span class="sg-row-val" id="setting-preview-whatsapp">+8801… →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="delivery">
+          <span class="sg-row-lbl">Base delivery charge</span>
+          <span class="sg-row-val" id="setting-preview-delivery">৳140 →</span>
+        </button>
+      </div>
+
+      <div class="sg">
+        <div class="sg-hdr">Storefront</div>
+        <button type="button" class="sg-row" data-setting="hero">
+          <span class="sg-row-lbl">Hero heading</span>
+          <span class="sg-row-val">Edit →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="announce">
+          <span class="sg-row-lbl">Announcement bar</span>
+          <span class="sg-row-val">Edit →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="trust">
+          <span class="sg-row-lbl">Trust badges</span>
+          <span class="sg-row-val" id="setting-preview-trust">3 items →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="payment">
+          <span class="sg-row-lbl">Payment methods</span>
+          <span class="sg-row-val" id="setting-preview-payment">COD →</span>
+        </button>
+      </div>
+
+      <div class="sg">
+        <div class="sg-hdr">Advanced</div>
+        <button type="button" class="sg-row" data-setting="sources">
+          <span class="sg-row-lbl">Catalog & orders sources</span>
+          <span class="sg-row-val">Edit →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="districts">
+          <span class="sg-row-lbl">District delivery rules</span>
+          <span class="sg-row-val">Edit →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="footer">
+          <span class="sg-row-lbl">Footer</span>
+          <span class="sg-row-val">Edit →</span>
+        </button>
+        <button type="button" class="sg-row" data-setting="raw-json">
+          <span class="sg-row-lbl">Raw data/context.json</span>
+          <span class="sg-row-val">Edit →</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAV (fixed) -->
+  <nav class="bottom-nav" id="seller-nav" role="navigation" aria-label="Seller sections">
+    <button type="button" class="nav-i on" data-panel="p-orders" aria-label="Orders">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+      Orders
+    </button>
+    <button type="button" class="nav-i" data-panel="p-products" aria-label="Products">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+      </svg>
+      Products
+    </button>
+    <button type="button" class="nav-i" data-panel="p-context" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </button>
+  </nav>
+</div>
+
+<!-- MODALS -->
+<div id="order-delete-modal" class="modal-overlay" hidden aria-hidden="true">
+  <div class="modal-dialog" role="dialog" aria-labelledby="order-delete-title" aria-modal="true">
+    <h2 id="order-delete-title">Delete this order?</h2>
+    <p class="modal-body hint" id="order-delete-msg"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn-sec" id="order-delete-cancel">Cancel</button>
+      <button type="button" class="btn-primary" id="order-delete-confirm">Delete order</button>
+    </div>
+  </div>
+</div>
+
+<!-- Product edit modal -->
+<div id="product-edit-modal" class="modal-overlay modal-fullscreen" hidden aria-hidden="true">
+  <div class="modal-fullscreen-content">
+    <div class="modal-fullscreen-header">
+      <button type="button" class="btn-back" id="product-edit-back" aria-label="Back">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <h2 id="product-edit-title">Edit product</h2>
+      <button type="button" class="btn-primary-s" id="product-edit-save">Save</button>
+    </div>
+    <div class="modal-fullscreen-body" id="product-edit-form"></div>
+  </div>
+</div>
+
+<!-- Settings edit modal -->
+<div id="setting-edit-modal" class="modal-overlay modal-fullscreen" hidden aria-hidden="true">
+  <div class="modal-fullscreen-content">
+    <div class="modal-fullscreen-header">
+      <button type="button" class="btn-back" id="setting-edit-back" aria-label="Back">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <h2 id="setting-edit-title">Edit setting</h2>
+      <button type="button" class="btn-primary-s" id="setting-edit-save">Save</button>
+    </div>
+    <div class="modal-fullscreen-body" id="setting-edit-form"></div>
+  </div>
+</div>
+
+<script src="logic/seller.js" defer></script>
+</body>
+</html>

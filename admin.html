@@ -29,8 +29,6 @@
     <div class="top-actions">
       <a class="btn btn-ghost" href="shop.html" target="_blank" rel="noopener">Open shop</a>
       <button type="button" class="btn btn-ghost" id="btn-logout">Log out</button>
-      <button type="button" class="btn btn-primary" id="btn-save-context">Save data/context.json</button>
-      <button type="button" class="btn btn-primary" id="btn-save-products">Save products (CSV)</button>
     </div>
   </div>
   <span class="msg" id="msg" role="status"></span>
@@ -63,6 +61,9 @@
 
   <!-- CONTEXT -->
   <div class="panel on" id="p-context">
+    <div class="prod-toolbar" style="margin-bottom:14px;justify-content:flex-end">
+      <button type="button" class="btn btn-primary" id="btn-save-context">Update context</button>
+    </div>
     <div class="card">
       <h2>General</h2>
       <div class="fgrid fgrid2">
@@ -283,6 +284,7 @@
         <button type="button" class="btn btn-ghost" id="btn-reload-products">Refresh</button>
         <button type="button" class="btn btn-ghost" id="btn-add-product">+ Add product</button>
         <span class="hint" id="prod-count"></span>
+        <button type="button" class="btn btn-primary" id="btn-save-products" style="margin-left:auto">Update products</button>
       </div>
       <div class="table-scroll">
         <table class="prod" id="prod-table">
@@ -293,14 +295,10 @@
               <th>price</th>
               <th>original_price</th>
               <th>category</th>
-              <th>emoji</th>
               <th class="col-image_urls">image_urls (list)</th>
               <th>desc</th>
-              <th>rating</th>
-              <th>reviews</th>
               <th>badge</th>
               <th>in_stock</th>
-              <th>stock</th>
               <th>views</th>
               <th>bundle</th>
               <th>variations</th>

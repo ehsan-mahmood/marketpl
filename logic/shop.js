@@ -439,66 +439,65 @@ function normalizeProductImages(row) {
 
 
 // ── CSV COLUMN GUIDE ───────────────────────────────────────────────
-// Required columns (must be present in header row):
-//   id, name, price, category, emoji, desc, in_stock
-// Optional columns (can be omitted; sensible defaults applied):
-//   original_price  — strike-through price; leave blank for none
-//   image_urls      — image URLs, comma-separated (first URL = cover image)
-//   rating          — e.g. 4.8   (default 4.5)
-//   reviews         — e.g. 124   (default 0)
-//   badge           — one of: sale | hot | new  (leave blank for none)
-//   stock           — integer stock count; 0 treated as out-of-stock
-//   views           — "X people viewed today" social proof number
-//   bundle          — comma-separated IDs of 1–2 bundle partners e.g. "2,16"
-//                     wrap in quotes in the CSV if using commas: "2,16"
+// Core columns: id, name, price, category, image_urls, desc, in_stock, views, bundle, variations
+// Optional: original_price, badge
+//   original_price  — strike-through; leave blank for none
+//   image_urls      — URLs comma-separated (first = cover; legacy image_url also supported in code)
+//   badge             — sale | hot | new | (blank)
+//   in_stock         — TRUE / FALSE (only availability flag; not an inventory count)
+//   views             — social proof number
+//   bundle            — 1–2 partner product IDs, e.g. 2,16 (quote the cell if needed: "2,16")
+//   variations        — showroom: pipe- or comma-separated, e.g. S|M|L|XL
+//
+// Product cards use a fixed default emoji and rating display (not from CSV).
+
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  SECTION 2 — PRODUCTS (inline CSV fallback)                    ║
 // ║  Set csv_url in data/context.json (e.g. data/products.csv).        ║
 // ║  If csv_url is "" or fetch fails, this embedded CSV is used.   ║
-// ║  Columns: id, name, price, original_price, category, emoji,   ║
-// ║           image_urls, desc, rating, reviews, badge, in_stock,  ║
-// ║           stock, views, bundle                                 ║
-// ║  • badge: sale | hot | new | (blank)                          ║
-// ║  • in_stock: TRUE or FALSE                                     ║
-// ║  • bundle: quote the cell if it has a comma e.g. "2,16"       ║
+// ║  Header must match: id, name, price, original_price, category,  ║
+// ║    image_urls, desc, badge, in_stock, views, bundle, variations  ║
+// ║  • in_stock: TRUE or FALSE                                      ║
+// ║  • bundle: quote the cell if it has a comma e.g. "2,16"        ║
 // ╚══════════════════════════════════════════════════════════════════╝
-var INLINE_CSV = `id,name,price,original_price,category,emoji,image_url,image_urls,desc,rating,reviews,badge,in_stock,stock,views,bundle
-1,Premium Cotton T-Shirt — S,450,600,clothing,👕,,Ultra-soft 100% combed cotton. Pre-shrunk. Size S.,4.8,124,sale,TRUE,12,34,"2,16"
-2,Premium Cotton T-Shirt — M,450,600,clothing,👕,,Ultra-soft 100% combed cotton. Pre-shrunk. Size M.,4.8,124,sale,TRUE,3,51,"1,16"
-3,Premium Cotton T-Shirt — L,450,600,clothing,👕,,Ultra-soft 100% combed cotton. Pre-shrunk. Size L.,4.8,124,sale,TRUE,7,29,"1,25"
-4,Premium Cotton T-Shirt — XL,450,600,clothing,👕,,Ultra-soft 100% combed cotton. Pre-shrunk. Size XL.,4.8,124,sale,TRUE,2,18,"1,26"
-5,Premium Cotton T-Shirt — XXL,450,600,clothing,👕,,Ultra-soft 100% combed cotton. Pre-shrunk. Size XXL.,4.8,124,sale,TRUE,9,22,"1,28"
-6,Running Sneakers (EU 38),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 38.,4.9,87,hot,TRUE,4,67,"16,23"
-7,Running Sneakers (EU 39),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 39.,4.9,87,hot,TRUE,11,43,"16,23"
-8,Running Sneakers (EU 40),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 40.,4.9,87,hot,TRUE,2,88,"16,20"
-9,Running Sneakers (EU 41),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 41.,4.9,87,hot,TRUE,6,71,"16,20"
-10,Running Sneakers (EU 42),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 42.,4.9,87,hot,TRUE,1,94,"16,21"
-11,Running Sneakers (EU 43),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 43.,4.9,87,hot,TRUE,8,55,"16,22"
-12,Running Sneakers (EU 44),1800,2500,footwear,👟,,Lightweight EVA sole with breathable mesh upper. EU 44.,4.9,87,hot,TRUE,5,38,"16,22"
-13,Genuine Leather Handbag — Black,1200,,accessories,👜,,Full-grain genuine leather. Black.,4.7,56,new,TRUE,15,42,"29,16"
-14,Genuine Leather Handbag — Brown,1200,,accessories,👜,,Full-grain genuine leather. Brown.,4.7,56,new,TRUE,3,33,"30,16"
-15,Genuine Leather Handbag — Tan,1200,,accessories,👜,,Full-grain genuine leather. Tan.,4.7,56,new,TRUE,7,27,"29,16"
-16,UV400 Polarized Sunglasses,380,550,accessories,🕶️,,Polarized UV400 protection. Unisex design. Includes hard case.,4.6,203,sale,TRUE,20,112,"6,1"
-17,Smart Watch Pro — Black,2800,3500,electronics,⌚,,1.4" AMOLED heart rate SpO2 7-day battery. Black.,4.8,341,hot,TRUE,2,143,"23,20"
-18,Smart Watch Pro — Silver,2800,3500,electronics,⌚,,1.4" AMOLED heart rate SpO2 7-day battery. Silver.,4.8,341,hot,TRUE,5,98,"23,21"
-19,Smart Watch Pro — Rose Gold,2800,3500,electronics,⌚,,1.4" AMOLED heart rate SpO2 7-day battery. Rose gold.,4.8,341,hot,TRUE,3,87,"23,22"
-20,Laptop Backpack 30L — Black,1100,,accessories,🎒,,30L padded 15.6" laptop slot USB-C charge port. Black.,4.7,178,new,TRUE,10,76,"17,23"
-21,Laptop Backpack 30L — Navy,1100,,accessories,🎒,,30L padded 15.6" laptop slot USB-C charge port. Navy.,4.7,178,new,TRUE,6,54,"18,23"
-22,Laptop Backpack 30L — Olive,1100,,accessories,🎒,,30L padded 15.6" laptop slot USB-C charge port. Olive.,4.7,178,new,TRUE,4,41,"19,23"
-23,True Wireless Earbuds — Black,950,1400,electronics,🎧,,30h total battery ANC IPX5. Black.,4.5,92,sale,TRUE,8,63,"17,20"
-24,True Wireless Earbuds — White,950,1400,electronics,🎧,,30h total battery ANC IPX5. White.,4.5,92,sale,TRUE,2,49,"18,21"
-25,Linen Kurta — S,680,850,clothing,👘,,Premium linen blend. Traditional cut. Size S.,4.9,215,,TRUE,9,88,"1,16"
-26,Linen Kurta — M,680,850,clothing,👘,,Premium linen blend. Traditional cut. Size M.,4.9,215,,TRUE,12,102,"2,16"
-27,Linen Kurta — L,680,850,clothing,👘,,Premium linen blend. Traditional cut. Size L.,4.9,215,,TRUE,7,79,"3,16"
-28,Linen Kurta — XL,680,850,clothing,👘,,Premium linen blend. Traditional cut. Size XL.,4.9,215,,TRUE,3,56,"4,16"
-29,Slim Leather Wallet — Black,550,700,accessories,👛,,Slim genuine leather bifold. RFID blocking. Black.,4.8,144,new,FALSE,0,38,"13,16"
-30,Slim Leather Wallet — Brown,550,700,accessories,👛,,Slim genuine leather bifold. RFID blocking. Brown.,4.8,144,new,FALSE,0,29,"14,16"
-31,Canvas Slip-On — White,650,,footwear,👟,,Classic canvas. Flexible rubber sole. White.,4.6,67,,TRUE,14,45,"16,1"
-32,Canvas Slip-On — Black,650,,footwear,👟,,Classic canvas. Flexible rubber sole. Black.,4.6,67,,TRUE,5,61,"16,2"
-33,Canvas Slip-On — Red,650,,footwear,👟,,Classic canvas. Flexible rubber sole. Red.,4.6,67,,TRUE,2,33,"16,3"
-34,Canvas Slip-On — Navy,650,,footwear,👟,,Classic canvas. Flexible rubber sole. Navy.,4.6,67,,TRUE,8,52,"16,4"`;
+var INLINE_CSV = `id,name,price,original_price,category,image_urls,desc,badge,in_stock,views,bundle,variations
+1,Premium Cotton T-Shirt — S,590,600,clothing,,Ultra-soft 100% combed cotton. Pre-shrunk. Size S.,sale,TRUE,34,"2,16",
+2,Premium Cotton T-Shirt — M,450,600,clothing,,Ultra-soft 100% combed cotton. Pre-shrunk. Size M.,sale,TRUE,51,"1,16",
+3,Premium Cotton T-Shirt — L,450,600,clothing,,Ultra-soft 100% combed cotton. Pre-shrunk. Size L.,sale,TRUE,29,"1,25",
+4,Premium Cotton T-Shirt — XL,450,600,clothing,,Ultra-soft 100% combed cotton. Pre-shrunk. Size XL.,sale,TRUE,18,"1,26",
+5,Premium Cotton T-Shirt — XXL,450,600,clothing,,Ultra-soft 100% combed cotton. Pre-shrunk. Size XXL.,sale,TRUE,22,"1,28",
+6,Running Sneakers (EU 38),2500,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 38.,hot,TRUE,67,"16,23",
+7,Running Sneakers (EU 39),1800,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 39.,hot,TRUE,43,"16,23",
+8,Running Sneakers (EU 40),1800,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 40.,hot,TRUE,88,"16,20",
+9,Running Sneakers (EU 41),1800,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 41.,hot,TRUE,71,"16,20",
+10,Running Sneakers (EU 42),1800,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 42.,hot,TRUE,94,"16,21",
+11,Running Sneakers (EU 43),1800,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 43.,hot,TRUE,55,"16,22",
+12,Running Sneakers (EU 44),1800,2500,footwear,,Lightweight EVA sole with breathable mesh upper. EU 44.,hot,TRUE,38,"16,22",
+13,Genuine Leather Handbag — Black,1200,,accessories,,Full-grain genuine leather. Black.,new,TRUE,42,"29,16",
+14,Genuine Leather Handbag — Brown,1200,,accessories,,Full-grain genuine leather. Brown.,new,TRUE,33,"30,16",
+15,Genuine Leather Handbag — Tan,1200,,accessories,,Full-grain genuine leather. Tan.,new,TRUE,27,"29,16",
+16,UV400 Polarized Sunglasses,380,550,accessories,,Polarized UV400 protection. Unisex design. Includes hard case.,sale,TRUE,112,"6,1",
+17,Smart Watch Pro — Black,2800,3500,electronics,,"1.4"" AMOLED heart rate SpO2 7-day battery. Black finish.",hot,TRUE,143,"23,20",
+18,Smart Watch Pro — Silver,2800,3500,electronics,,"1.4"" AMOLED heart rate SpO2 7-day battery. Silver finish.",hot,TRUE,98,"23,21",
+19,Smart Watch Pro — Rose Gold,2800,3500,electronics,,"1.4"" AMOLED heart rate SpO2 7-day battery. Rose gold finish.",hot,TRUE,87,"23,22",
+20,Laptop Backpack 30L — Black,1100,,accessories,,"30L padded 15.6"" laptop slot USB-C charge port. Black.",new,TRUE,76,"17,23",
+21,Laptop Backpack 30L — Navy,1100,,accessories,,"30L padded 15.6"" laptop slot USB-C charge port. Navy.",new,TRUE,54,"18,23",
+22,Laptop Backpack 30L — Olive,1100,,accessories,,"30L padded 15.6"" laptop slot USB-C charge port. Olive.",new,TRUE,41,"19,23",
+23,True Wireless Earbuds — Black,950,1400,electronics,,30h total battery ANC IPX5. Black.,sale,TRUE,63,"17,20",
+24,True Wireless Earbuds — White,950,1400,electronics,,30h total battery ANC IPX5. White.,sale,TRUE,49,"18,21",
+25,Linen Kurta — S,680,850,clothing,,Premium linen blend. Traditional cut. Size S.,,TRUE,88,"1,16",
+26,Linen Kurta — M,680,850,clothing,,Premium linen blend. Traditional cut. Size M.,,TRUE,102,"2,16",
+27,Linen Kurta — L,680,850,clothing,,Premium linen blend. Traditional cut. Size L.,,TRUE,79,"3,16",
+28,Linen Kurta — XL,680,850,clothing,,Premium linen blend. Traditional cut. Size XL.,,TRUE,56,"4,16",
+29,Slim Leather Wallet — Black,550,700,accessories,,Slim genuine leather bifold. RFID blocking. Black.,new,FALSE,38,"13,16",
+30,Slim Leather Wallet — Brown,550,700,accessories,,Slim genuine leather bifold. RFID blocking. Brown.,new,FALSE,29,"14,16",
+31,Canvas Slip-On — White,650,,footwear,,Classic canvas. Flexible rubber sole. White.,,TRUE,45,"16,1",
+32,Canvas Slip-On — Black,650,,footwear,,Classic canvas. Flexible rubber sole. Black.,,TRUE,61,"16,2",
+33,Canvas Slip-On — Red,650,,footwear,,Classic canvas. Flexible rubber sole. Red.,,TRUE,33,"16,3",
+34,Canvas Slip-On — Navy,650,,footwear,,Classic canvas. Flexible rubber sole. Navy.,,TRUE,52,"16,4",`;
 // ── end of Section 2 ─────────────────────────────────────────────
+
 
 var PRODUCTS=[], cart=[], activeProd=null, activeQty=1, lang='en';
 /** Where #cart-drw lived before moving into showroom inline anchor (restore when catalog grows). */
@@ -936,7 +935,7 @@ function renderGrid(list){
     /* 3. Social proof */
     var social=p.views&&p.inStock?'<div class="psocial"><span class="psocial-dot"></span>'+p.views+' '+t('people viewed today','জন আজ দেখেছেন')+'</div>':'';
     /* urgency */
-    var urgency=(p.inStock&&p.stock&&p.stock<=3)?'<div class="purgency">'+t('Only '+p.stock+' left!','মাত্র '+p.stock+'টি বাকি!')+'</div>':'';
+    var urgency='';
     var delivery=p.inStock?'<div class="pdelivery">🚚 '+t('Dhaka: Tomorrow','ঢাকা: আগামীকাল')+'</div>':'';
     /* inline qty + action buttons */
     var cardFoot='';
@@ -1172,7 +1171,6 @@ function openDrawer(pid){
   else if(p.badge==='sale'){db.innerHTML='<div class="pbadge pb-sale">SALE</div>';}
   else if(p.badge==='new'){db.innerHTML='<div class="pbadge pb-new">NEW</div>';}
   else if(p.badge==='hot'){db.innerHTML='<div class="pbadge pb-hot">HOT</div>';}
-  if(p.inStock&&p.stock&&p.stock<=3){db.innerHTML+='<div class="pbadge" style="background:#fff3ee;color:#e8440a;border:1px solid #ffd4c2">⚠ '+t('Only '+p.stock+' left','মাত্র '+p.stock+'টি বাকি')+'</div>';}
   document.getElementById('d-name').textContent=p.name;
   document.getElementById('d-price').textContent=taka(p.price);
   document.getElementById('d-orig').textContent=p.original?taka(p.original):'';
@@ -1396,11 +1394,10 @@ function generateOrderId(){
 
 function logLinesFromCart(){
   return cart.map(function(item){
-    var nm = item.prod.name;
-    if (item.variant) nm = nm + ' — ' + item.variant;
     return{
       productId:item.prod.id,
-      productName:nm,
+      productName:item.prod.name,
+      variation:item.variant||'',
       qty:item.qty,
       unitPrice:item.prod.price,
       lineTotal:item.prod.price*item.qty
@@ -1613,14 +1610,12 @@ function rowToProduct(row, index) {
     ? bundleRaw.split(',').map(function(x){ return parseInt(x.trim(), 10); }).filter(Boolean)
     : [];
 
-  var stockVal  = parseInt(row.stock, 10);
   var inStockRaw = (row.in_stock || '').toString().trim().toUpperCase();
-  // Treat: TRUE / 1 / YES / (non-zero stock when field missing) as in stock
-  var inStock = (inStockRaw === 'TRUE' || inStockRaw === '1' || inStockRaw === 'YES')
-    ? true
-    : (inStockRaw === 'FALSE' || inStockRaw === '0' || inStockRaw === 'NO')
-      ? false
-      : stockVal > 0; // fallback: derive from stock count
+  // Availability only (no per-SKU stock counts). Default to in stock when blank.
+  var inStock;
+  if (inStockRaw === 'TRUE' || inStockRaw === '1' || inStockRaw === 'YES') inStock = true;
+  else if (inStockRaw === 'FALSE' || inStockRaw === '0' || inStockRaw === 'NO') inStock = false;
+  else inStock = true;
 
   var price = parseFloat(row.price) || 0;
   var origIn = parseFloat(row.original_price);
@@ -1645,16 +1640,15 @@ function rowToProduct(row, index) {
     price:    price,
     original: original,
     category: (row.category || '').trim().toLowerCase(),
-    emoji:    (row.emoji    || '🛍️').trim(),
+    emoji:    '🛍️',
     image_url:images[0] || '',
     image_urls:(row.image_urls || '').trim(),
     images:   images,
     desc:     (row.desc     || '').trim(),
-    rating:   parseFloat(row.rating)  || 4.5,
-    reviews:  parseInt(row.reviews,10)|| 0,
+    rating:   4.5,
+    reviews:  0,
     badge:    badge,
     inStock:  inStock,
-    stock:    isNaN(stockVal) ? 99 : stockVal,
     views:    parseInt(row.views, 10) || Math.floor(Math.random() * 80 + 10),
     bundle:   bundle,
     variations: variations

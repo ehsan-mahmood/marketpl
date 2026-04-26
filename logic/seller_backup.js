@@ -18,21 +18,95 @@
 
   function $(id) { return document.getElementById(id); }
 
+  var lastOrders = [];
+  var orderFilter = 'all';
+
   function showLoginScreen() {
     $('login-screen').style.display = '';
-    $('admin-app').style.display = 'none';
+    $('seller-app').style.display = 'none';
   }
-  function showAdminApp() {
+  function showSellerApp() {
     $('login-screen').style.display = 'none';
-    $('admin-app').style.display = '';
+    $('seller-app').style.display = '';
+    updateGreeting();
+  }
+
+  function stripTags(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.innerHTML = String(s);
+    return d.textContent || d.innerText || '';
+  }
+
+  function updateGreeting() {
+    var h = new Date().getHours();
+    var g = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    var el = $('seller-greeting');
+    if (el) el.textContent = g;
+  }
+
+  function todayYmd() {
+    var d = new Date();
+    return (
+      d.getFullYear() +
+      '-' +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      '-' +
+      String(d.getDate()).padStart(2, '0')
+    );
+  }
+
+  function isPlacedOnLocalDay(placed) {
+    if (placed == null) return false;
+    var t = String(placed).replace('T', ' ').trim().slice(0, 10);
+    return t === todayYmd();
+  }
+
+  function parseSubtotalNum(v) {
+    var n = parseFloat(String(v || '').replace(/[^\d.-]/g, ''));
+    return isFinite(n) ? n : 0;
+  }
+
+  function orderMatchesFilter(o) {
+    if (orderFilter === 'all') return true;
+    var s = String(o.status || 'placed').toLowerCase();
+    if (orderFilter === 'new') return s === 'placed';
+    if (orderFilter === 'confirmed') return s === 'confirmed';
+    if (orderFilter === 'despatched') return s === 'despatched';
+    if (orderFilter === 'delivered') return s === 'delivered';
+    return true;
+  }
+
+  function ocardClassForStatus(status) {
+    var s = String(status || 'placed').toLowerCase();
+    if (s === 'placed') return 'new';
+    if (s === 'confirmed') return 'conf';
+    if (s === 'despatched') return 'desp';
+    if (s === 'delivered') return 'desp';
+    return 'new';
+  }
+
+  function badgeClassForStatus(status) {
+    var s = String(status || 'placed').toLowerCase();
+    if (s === 'placed') return 'b-placed';
+    if (s === 'confirmed') return 'b-conf';
+    if (s === 'despatched') return 'b-desp';
+    if (s === 'delivered') return 'b-desp';
+    return 'b-placed';
+  }
+
+  function capStatus(status) {
+    var s = String(status || 'placed');
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Placed';
   }
 
   function showMsg(text, ok) {
     var el = $('msg');
+    if (!el) return;
     el.textContent = text;
-    el.className = 'msg on ' + (ok ? 'ok' : 'err');
+    el.className = 'msg seller-msg on ' + (ok ? 'ok' : 'err');
     clearTimeout(showMsg._t);
-    showMsg._t = setTimeout(function () { el.className = 'msg'; }, 4500);
+    showMsg._t = setTimeout(function () { el.className = 'msg seller-msg'; }, 4500);
   }
 
   function linesToArr(t) {
@@ -462,6 +536,15 @@
       $('c-store-tagline_en').value = ctx.store.tagline_en || '';
       $('c-store-tagline_bn').value = ctx.store.tagline_bn || '';
     }
+    var ns = $('seller-store-name');
+    if (ns) {
+      if (ctx.store) {
+        var raw = (ctx.store.name_en || ctx.store.name_bn || 'Your store').trim();
+        ns.textContent = stripTags(raw) || 'Your store';
+      } else {
+        ns.textContent = 'Your store';
+      }
+    }
     if (ctx.announce) {
       $('c-announce-en').value = ctx.announce.en || '';
       $('c-announce-bn').value = ctx.announce.bn || '';
@@ -609,7 +692,7 @@
         if (p && typeof onDone === 'function') {
           onDone(p);
         }
-        showMsg('Image saved to ' + p + '. Click “Save products (CSV)” to keep the path in the sheet.', true);
+        showMsg('Image saved to ' + p + '. Click “Update products” to keep the path in the catalog.', true);
       })
       .catch(function (e) {
         if (String(e.message) !== 'Unauthorized') {
@@ -919,12 +1002,6 @@
   $('prod-tbody').addEventListener('change', function () { refreshProductsDirtyState(); });
 
   /* Orders */
-  function tdText(text) {
-    var td = document.createElement('td');
-    td.textContent = text != null ? String(text) : '';
-    return td;
-  }
-
   function summarizeOrderLines(o) {
     var lines = o.lines || [];
     if (!lines.length) return '—';
@@ -990,47 +1067,119 @@
     return line;
   }
 
-  function renderOrdersTable(orders) {
-    var tb = $('orders-tbody');
-    tb.innerHTML = '';
-    $('orders-count').textContent = (orders && orders.length ? orders.length : 0) + ' order(s)';
-    if (!orders || !orders.length) {
-      var trE = document.createElement('tr');
-      var tdE = document.createElement('td');
-      tdE.colSpan = 9;
-      tdE.className = 'hint';
-      tdE.style.padding = '16px';
-      tdE.textContent = 'No orders yet.';
-      trE.appendChild(tdE);
-      tb.appendChild(trE);
+  function updateOrderStats(orders) {
+    var placedN = 0;
+    var need = 0;
+    var rev = 0;
+    var desp = 0;
+    var delv = 0;
+    (orders || []).forEach(function (o) {
+      var s = String(o.status || 'placed').toLowerCase();
+      if (s === 'placed') {
+        placedN++;
+        need++;
+      }
+      if (s === 'confirmed') need++;
+      if (isPlacedOnLocalDay(o.placedAt)) {
+        rev += parseSubtotalNum(o.subtotal);
+      }
+      if (s === 'despatched') desp++;
+      if (s === 'delivered') delv++;
+    });
+    var tEl = $('seller-ticker-text');
+    if (tEl) {
+      tEl.textContent =
+        placedN > 0
+          ? placedN + ' new order' + (placedN === 1 ? '' : 's') + ' — confirm and dispatch from here'
+          : "You're all caught up — no new orders waiting";
+    }
+    var sn = $('seller-stat-need');
+    if (sn) sn.textContent = String(need);
+    var sr = $('seller-stat-rev');
+    if (sr) sr.textContent = '৳' + (Math.round(rev) || 0).toLocaleString();
+    var sd = $('seller-stat-desp');
+    if (sd) sd.textContent = String(desp);
+    var sdel = $('seller-stat-del');
+    if (sdel) sdel.textContent = String(delv);
+    var pip = $('seller-notif-pip');
+    if (pip) {
+      if (placedN > 0) pip.removeAttribute('hidden');
+      else pip.setAttribute('hidden', '');
+    }
+  }
+
+  function syncOrderFilterPills(orders) {
+    var nPlaced = 0;
+    (orders || []).forEach(function (o) {
+      if (String(o.status || 'placed').toLowerCase() === 'placed') nPlaced++;
+    });
+    var pNew = $('order-pill-new');
+    if (pNew) pNew.textContent = nPlaced ? 'New (' + nPlaced + ')' : 'New';
+  }
+
+  function renderOrdersList(orders) {
+    lastOrders = orders || [];
+    updateOrderStats(lastOrders);
+    syncOrderFilterPills(lastOrders);
+    var list = lastOrders.filter(orderMatchesFilter);
+    var host = $('orders-list');
+    if (!host) return;
+    var countEl = $('orders-count');
+    if (countEl) {
+      if (orderFilter === 'all' || !lastOrders.length) {
+        countEl.textContent = (list.length || 0) + ' order(s)';
+      } else {
+        countEl.textContent = list.length + ' of ' + lastOrders.length + ' order(s)';
+      }
+    }
+    if (!list.length) {
+      if (!lastOrders.length) {
+        host.innerHTML =
+          '<div class="empty-promo" role="status"><div class="ep-icon" aria-hidden="true">🛍</div>' +
+          '<div class="ep-title">No orders yet</div><p class="ep-sub">When customers check out, orders will appear here. Refresh anytime.</p></div>';
+      } else {
+        host.innerHTML =
+          '<div class="empty-promo" role="status"><div class="ep-icon" aria-hidden="true">↻</div>' +
+          '<div class="ep-title">No orders in this filter</div><p class="ep-sub">Try "All orders" or pick another status.</p></div>';
+      }
       return;
     }
-    orders.forEach(function (o) {
-      var tr = document.createElement('tr');
-      tr.appendChild(tdText(o.orderId || ''));
-      tr.appendChild(tdText(o.placedAt || ''));
-      tr.appendChild(tdText(o.customerName || ''));
-      tr.appendChild(tdText(o.customerPhone || ''));
-      var tdDel = document.createElement('td');
-      tdDel.className = 'orders-delivery';
-      tdDel.textContent = formatFullDelivery(o);
-      tr.appendChild(tdDel);
-      var tdIt = document.createElement('td');
-      tdIt.className = 'orders-items';
-      tdIt.textContent = summarizeOrderLines(o);
-      tr.appendChild(tdIt);
-      tr.appendChild(tdText(o.subtotal || ''));
-      var tdSt = document.createElement('td');
-      tdSt.className = 'col-st';
-      tdSt.textContent = o.status || 'placed';
-      tr.appendChild(tdSt);
-      var tdAct = document.createElement('td');
-      tdAct.className = 'col-actions';
-      var wrap = document.createElement('div');
-      wrap.className = 'orders-actions';
+    host.innerHTML = '';
+    list.forEach(function (o) {
+      var card = document.createElement('div');
+      card.className = 'ocard ' + ocardClassForStatus(o.status);
+      var row1 = document.createElement('div');
+      row1.className = 'oc-row1';
+      var left = document.createElement('div');
+      var nm = document.createElement('div');
+      nm.className = 'oc-name';
+      nm.textContent = o.customerName || '—';
+      var time = document.createElement('div');
+      time.className = 'oc-time';
+      var tParts = [o.customerPhone, o.placedAt, formatFullDelivery(o)].filter(function (x) {
+        return (x != null && String(x).trim() !== '');
+      });
+      time.textContent = tParts.join(' · ');
+      left.appendChild(nm);
+      left.appendChild(time);
+      var badge = document.createElement('span');
+      badge.className = 'oc-badge ' + badgeClassForStatus(o.status);
+      badge.textContent = capStatus(o.status);
+      row1.appendChild(left);
+      row1.appendChild(badge);
+      var items = document.createElement('div');
+      items.className = 'oc-items';
+      items.textContent = summarizeOrderLines(o);
+      var foot = document.createElement('div');
+      foot.className = 'oc-foot';
+      var total = document.createElement('div');
+      total.className = 'oc-total';
+      total.textContent = o.subtotal != null && String(o.subtotal).trim() ? String(o.subtotal) : '—';
+      var btns = document.createElement('div');
+      btns.className = 'oc-btns';
       var btnN = document.createElement('button');
       btnN.type = 'button';
-      btnN.className = 'btn-mini btn-next';
+      btnN.className = 'btn-s btn-main';
       btnN.textContent = nextOrderActionLabel(o.status);
       btnN.title = ordersCanMutate ? 'Move to next status' : ordersMutateDisabledTitle();
       btnN.disabled = !ordersCanMutate;
@@ -1040,7 +1189,7 @@
       });
       var btnD = document.createElement('button');
       btnD.type = 'button';
-      btnD.className = 'btn-mini btn-del';
+      btnD.className = 'btn-s btn-del';
       btnD.textContent = 'Delete';
       btnD.title = ordersCanMutate
         ? ordersSource === 'csv'
@@ -1051,11 +1200,14 @@
       btnD.addEventListener('click', function () {
         ordersDelete(oid, o.customerName || oid);
       });
-      wrap.appendChild(btnN);
-      wrap.appendChild(btnD);
-      tdAct.appendChild(wrap);
-      tr.appendChild(tdAct);
-      tb.appendChild(tr);
+      btns.appendChild(btnD);
+      btns.appendChild(btnN);
+      foot.appendChild(total);
+      foot.appendChild(btns);
+      card.appendChild(row1);
+      card.appendChild(items);
+      card.appendChild(foot);
+      host.appendChild(card);
     });
   }
 
@@ -1076,7 +1228,7 @@
         ordersCanMutate = x.j.canMutate !== false;
         ordersSource = x.j.source != null ? String(x.j.source) : 'csv';
         updateOrdersChrome();
-        renderOrdersTable(x.j.orders || []);
+        renderOrdersList(x.j.orders || []);
       });
   }
 
@@ -1194,16 +1346,20 @@
     });
   });
 
-  /* Tabs */
-  document.querySelectorAll('#tabs .tab').forEach(function (t) {
+  function setActivePanel(id) {
+    document.querySelectorAll('#seller-nav .nav-i').forEach(function (x) {
+      x.classList.toggle('on', x.getAttribute('data-panel') === id);
+    });
+    document.querySelectorAll('.panel').forEach(function (p) {
+      p.classList.toggle('on', p.id === id);
+    });
+  }
+
+  document.querySelectorAll('#seller-nav .nav-i').forEach(function (t) {
     t.addEventListener('click', function () {
       var id = t.getAttribute('data-panel');
-      document.querySelectorAll('#tabs .tab').forEach(function (x) {
-        x.classList.toggle('on', x === t);
-      });
-      document.querySelectorAll('.panel').forEach(function (p) {
-        p.classList.toggle('on', p.id === id);
-      });
+      if (!id) return;
+      setActivePanel(id);
       if (id === 'p-orders') {
         loadOrders().catch(function (e) {
           if (String(e.message) !== 'Unauthorized') {
@@ -1214,10 +1370,25 @@
     });
   });
 
-  function startAdminData() {
+  document.querySelectorAll('#order-filter-pills .pill').forEach(function (p) {
+    p.addEventListener('click', function () {
+      var f = p.getAttribute('data-filter') || 'all';
+      orderFilter = f;
+      document.querySelectorAll('#order-filter-pills .pill').forEach(function (x) {
+        x.classList.toggle('on', (x.getAttribute('data-filter') || 'all') === f);
+        x.setAttribute('aria-pressed', (x.getAttribute('data-filter') || 'all') === f ? 'true' : 'false');
+      });
+      renderOrdersList(lastOrders);
+    });
+  });
+
+  function startSellerData() {
     loadContext()
       .then(loadProducts)
       .then(loadDeliveryMap)
+      .then(function () {
+        return loadOrders().catch(function () {});
+      })
       .catch(function (e) {
         showMsg('Load error: ' + (e && e.message ? e.message : e), false);
       });
@@ -1250,8 +1421,8 @@
         $('login-pass').value = '';
         lm.className = 'msg login-msg';
         lm.textContent = '';
-        showAdminApp();
-        startAdminData();
+        showSellerApp();
+        startSellerData();
       })
       .catch(function (e) {
         lm.textContent = e && e.message ? e.message : 'Network error';
@@ -1324,8 +1495,8 @@
     })
     .then(function (s) {
       if (s.loggedIn) {
-        showAdminApp();
-        startAdminData();
+        showSellerApp();
+        startSellerData();
       } else {
         showLoginScreen();
       }

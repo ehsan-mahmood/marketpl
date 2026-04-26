@@ -678,7 +678,7 @@ function parseCsvLine(line) {
 }
 
 const ORDERS_CSV_HEADER =
-  'order_id,placed_at,customer_name,customer_phone,address,city,area,note,payment_method,order_subtotal,product_id,product_name,qty,unit_price,line_total,status';
+  'order_id,placed_at,customer_name,customer_phone,address,city,area,note,payment_method,order_subtotal,product_id,product_name,variation,qty,unit_price,line_total,status';
 const ORDER_COLUMNS = ORDERS_CSV_HEADER.split(',');
 
 /** Map Sheet headers (truncated / aliases) to canonical column names. */
@@ -946,7 +946,7 @@ function getSheetsClient() {
 
 async function readOrderRowsFromSheets(cfg) {
   const sheets = getSheetsClient();
-  const range = `${quoteSheetNameForRange(cfg.sheetName)}!A:Q`;
+  const range = `${quoteSheetNameForRange(cfg.sheetName)}!A:R`;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: cfg.spreadsheetId,
     range
@@ -1069,14 +1069,14 @@ async function appendOrderRowsToSheets(cfg, csvLines) {
   }
   await sheets.spreadsheets.values.append({
     spreadsheetId: cfg.spreadsheetId,
-    range: `${q}!A:Q`,
+    range: `${q}!A:R`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values }
   });
 }
 
-/** If orders.csv predates the `status` column, rewrite once with `placed` on each row. */
+/** If orders.csv predates required columns, rewrite once with defaults. */
 function ensureOrdersFileSchemaSync() {
   ensureDataDirs();
   if (!fs.existsSync(ORDERS_PATH) || fs.statSync(ORDERS_PATH).size === 0) return;
@@ -1086,20 +1086,30 @@ function ensureOrdersFileSchemaSync() {
   });
   if (!lines.length) return;
   const header = parseCsvLine(lines[0]);
-  if (header.indexOf('status') !== -1) return;
-  const newHeader = header.concat(['status']);
+  const needsRewrite = ORDER_COLUMNS.some(function (col) {
+    return header.indexOf(col) === -1;
+  });
+  if (!needsRewrite) return;
+  const newHeader = ORDER_COLUMNS.slice();
+  const oldIndex = {};
+  header.forEach(function (h, idx) {
+    oldIndex[String(h || '').trim()] = idx;
+  });
   const outLines = [newHeader.map(csvEscapeCell).join(',')];
   for (let i = 1; i < lines.length; i++) {
     let fields = parseCsvLine(lines[i]);
     if (fields.length > header.length) fields = fields.slice(0, header.length);
     while (fields.length < header.length) fields.push('');
-    fields = fields.concat(['placed']);
+    const mapped = newHeader.map(function (col) {
+      if (Object.prototype.hasOwnProperty.call(oldIndex, col)) {
+        const v = fields[oldIndex[col]];
+        return v != null ? String(v) : '';
+      }
+      if (col === 'status') return 'placed';
+      return '';
+    });
     outLines.push(
-      newHeader
-        .map(function (_, idx) {
-          return csvEscapeCell(fields[idx] != null ? String(fields[idx]) : '');
-        })
-        .join(',')
+      mapped.map(csvEscapeCell).join(',')
     );
   }
   fs.writeFileSync(ORDERS_PATH, outLines.join('\n') + '\n', 'utf8');
@@ -1234,12 +1244,24 @@ function tryRecoverGarbledOrderRow(r) {
   const up = parseFloat(parts[parts.length - 2]);
   const qty = parseInt(parts[parts.length - 3], 10);
   if (!Number.isFinite(qty) || qty < 1 || !Number.isFinite(up) || !Number.isFinite(lt)) return null;
-  const pname = (parts[parts.length - 4] || '').trim();
-  const pid = (parts[parts.length - 5] || '').trim();
+  let pid = '';
+  let pname = '';
+  let variation = '';
+  // New schema tail: pid,pname,variation,qty,unit_price,line_total
+  // Old schema tail: pid,pname,qty,unit_price,line_total
+  if (parts.length >= 9) {
+    variation = (parts[parts.length - 4] || '').trim();
+    pname = (parts[parts.length - 5] || '').trim();
+    pid = (parts[parts.length - 6] || '').trim();
+  } else {
+    pname = (parts[parts.length - 4] || '').trim();
+    pid = (parts[parts.length - 5] || '').trim();
+  }
   return Object.assign({}, r, {
     order_id: '',
     product_id: pid,
     product_name: pname,
+    variation: variation,
     qty: String(qty),
     unit_price: String(up),
     line_total: String(lt)
@@ -1328,6 +1350,7 @@ function aggregateOrdersForApi(rows) {
     by.get(id).lines.push({
       productId: r.product_id || '',
       productName: r.product_name || '',
+      variation: r.variation || '',
       qty: r.qty || '',
       unitPrice: r.unit_price || '',
       lineTotal: r.line_total || ''
@@ -1560,6 +1583,7 @@ const server = http.createServer(async (req, res) => {
         const L = lines[i] || {};
         const pid = clampInput(L.productId != null ? L.productId : L.product_id, 24);
         const pname = clampInput(L.productName != null ? L.productName : L.product_name, 400);
+        const variation = clampInput(L.variation != null ? L.variation : L.variant, 120);
         let qty = Number(L.qty);
         if (!Number.isFinite(qty) || qty < 1) qty = 1;
         let up = Number(L.unitPrice != null ? L.unitPrice : L.unit_price);
@@ -1579,6 +1603,7 @@ const server = http.createServer(async (req, res) => {
           subStr,
           pid,
           pname,
+          variation,
           String(Math.floor(qty)),
           String(up),
           String(lt),
@@ -1588,6 +1613,7 @@ const server = http.createServer(async (req, res) => {
         cleanLines.push({
           productId: pid,
           productName: pname,
+          variation: variation,
           qty: String(Math.floor(qty)),
           unitPrice: String(up),
           lineTotal: String(lt)
@@ -1804,6 +1830,8 @@ const server = http.createServer(async (req, res) => {
   const pageAlias = {
     '/admin': '/admin.html',
     '/admin/': '/admin.html',
+    '/seller': '/seller.html',
+    '/seller/': '/seller.html',
     '/shop1': '/shop.html',
     '/shop1/': '/shop.html',
     '/shop2': '/shop-showroom.html',
@@ -1854,15 +1882,15 @@ server.listen(PORT, '0.0.0.0', () => {
   const isCloud = process.env.RENDER || process.env.RAILWAY || process.env.FLY_APP_NAME;
   if (isCloud) {
     console.log(`Server running on port ${PORT}`);
-    console.log('  /shop1 → shop.html   /shop2 → shop-showroom.html   /admin → admin.html');
+    console.log('  /shop1 → shop.html   /shop2 → shop-showroom.html   /admin → admin.html   /seller → seller.html');
   } else {
     console.log(`This PC:  http://127.0.0.1:${PORT}/shop2  (showroom)   http://127.0.0.1:${PORT}/shop1  (classic)`);
-    console.log(`Admin:      http://127.0.0.1:${PORT}/admin`);
+    console.log(`Admin:      http://127.0.0.1:${PORT}/admin   seller: http://127.0.0.1:${PORT}/seller`);
     const ips = ipv4LANAddresses();
     if (ips.length) {
       console.log('Same Wi\u2011Fi / LAN (use from phones & other PCs):');
       ips.forEach(function (ip) {
-        console.log(`  http://${ip}:${PORT}/shop2  |  admin: http://${ip}:${PORT}/admin`);
+        console.log(`  http://${ip}:${PORT}/shop2  |  admin: http://${ip}:${PORT}/admin  seller: http://${ip}:${PORT}/seller`);
       });
     } else {
       console.log('(No non-local IPv4 found \u2014 check Wi\u2011Fi/Ethernet.)');
