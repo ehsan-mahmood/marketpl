@@ -8,6 +8,7 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 var CTX = null;
 var ASSET_BANNER_SLIDES = [];
+var ASSET_DIR_IMAGE_CACHE = Object.create(null);
 
 function loadContext() {
   /* Query string avoids stale data/context.json when the browser or dev server caches aggressively. */
@@ -422,18 +423,124 @@ function splitCsvImageUrls(text) {
     .filter(Boolean);
 }
 
+function isAssetRelativeUrl(url) {
+  return /^assets\//i.test(String(url || '').trim());
+}
+
+function normalizeAssetRelativeUrl(url) {
+  var s = String(url || '').trim();
+  if (!s) return '';
+  if (isAssetRelativeUrl(s)) return '/' + s.replace(/^\/+/, '');
+  return s;
+}
+
+function productFolderNameFromName(name) {
+  var raw = String(name || '').trim();
+  if (!raw) return 'unnamed-product';
+  var out = raw
+    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+$/, '')
+    .trim()
+    .slice(0, 80);
+  return out || 'unnamed-product';
+}
+
 function normalizeProductImages(row) {
   var extra = splitCsvImageUrls(row && row.image_urls);
   var out = [];
   function push(u) {
-    var s = String(u || '').trim();
+    var s = normalizeAssetRelativeUrl(u);
     if (!s) return;
     if (out.indexOf(s) === -1) out.push(s);
   }
   // Legacy fallback only (older CSVs may still carry image_url)
   push(row && row.image_url);
   extra.forEach(push);
+  if (CTX && CTX.assets_source === 'google_drive') {
+    // In Drive-backed assets mode, prefer assets/* entries as the cover image.
+    out.sort(function (a, b) {
+      var aa = isAssetRelativeUrl(a) || /^\/assets\//i.test(String(a || '').trim());
+      var bb = isAssetRelativeUrl(b) || /^\/assets\//i.test(String(b || '').trim());
+      if (aa === bb) return 0;
+      return aa ? -1 : 1;
+    });
+  }
   return out;
+}
+
+function getAssetDirectoryCandidateFromImages(images) {
+  if (!images || !images.length) return '';
+  for (var i = 0; i < images.length; i++) {
+    var raw = String(images[i] || '').trim();
+    if (!raw) continue;
+    var s = raw.replace(/^\/+/, '');
+    if (!/^assets\//i.test(s)) continue;
+    if (s.endsWith('/')) return s.replace(/\/+$/, '');
+    var slash = s.lastIndexOf('/');
+    if (slash > 0) return s.slice(0, slash);
+  }
+  return '';
+}
+
+function getProductNameAssetDirectory(product) {
+  if (!product) return '';
+  var folder = productFolderNameFromName(product.name || '');
+  return 'assets/products/' + folder;
+}
+
+function fetchAssetDirectoryImages(dirPath) {
+  var clean = String(dirPath || '').trim().replace(/^\/+/, '').replace(/\/+$/, '');
+  if (!clean || !/^assets\//i.test(clean)) return Promise.resolve([]);
+  if (Object.prototype.hasOwnProperty.call(ASSET_DIR_IMAGE_CACHE, clean)) {
+    return Promise.resolve((ASSET_DIR_IMAGE_CACHE[clean] || []).slice());
+  }
+  return fetch('/api/assets-list?dir=' + encodeURIComponent(clean) + '&cb=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+    .then(function (x) {
+      if (!x.ok || !x.j || !x.j.ok || !Array.isArray(x.j.urls)) {
+        ASSET_DIR_IMAGE_CACHE[clean] = [];
+        return [];
+      }
+      var list = x.j.urls.map(function (u) { return String(u || '').trim(); }).filter(Boolean);
+      ASSET_DIR_IMAGE_CACHE[clean] = list.slice();
+      return list;
+    })
+    .catch(function () {
+      ASSET_DIR_IMAGE_CACHE[clean] = [];
+      return [];
+    });
+}
+
+function enrichProductsFromAssetDirectories(products) {
+  var jobs = [];
+  (products || []).forEach(function (p) {
+    var dirs = [];
+    var byNameDir = getProductNameAssetDirectory(p);
+    if (byNameDir) dirs.push(byNameDir);
+    var fromImagesDir = getAssetDirectoryCandidateFromImages(p && p.images);
+    if (fromImagesDir && dirs.indexOf(fromImagesDir) === -1) dirs.push(fromImagesDir);
+    if (!dirs.length) return;
+    jobs.push(
+      Promise.all(dirs.map(fetchAssetDirectoryImages)).then(function (lists) {
+        if (!p) return;
+        var folderImgs = [];
+        (lists || []).forEach(function (arr) {
+          (arr || []).forEach(function (u) {
+            if (folderImgs.indexOf(u) === -1) folderImgs.push(u);
+          });
+        });
+        if (!folderImgs.length) return;
+        var merged = folderImgs.slice();
+        (p.images || []).forEach(function (u) {
+          if (merged.indexOf(u) === -1) merged.push(u);
+        });
+        p.images = merged;
+        p.image_url = merged[0] || p.image_url || '';
+      })
+    );
+  });
+  return Promise.all(jobs).then(function () { return products; });
 }
 
 
@@ -1666,7 +1773,9 @@ function parseInlineProducts() {
     console.warn('INLINE_CSV parse failed — check your CSV syntax.');
     PRODUCTS = [];
   }
-  showGrid();
+  enrichProductsFromAssetDirectories(PRODUCTS).then(function () {
+    showGrid();
+  });
 }
 
 /* ── LOAD PRODUCTS — data/products.csv via csv_url, else inline ── */
@@ -1689,7 +1798,9 @@ function loadProducts() {
       PRODUCTS = results.data
         .map(rowToProduct)
         .filter(function (p) { return p.name; });
-      showGrid();
+      enrichProductsFromAssetDirectories(PRODUCTS).then(function () {
+        showGrid();
+      });
     },
     error: function (err) {
       console.error('CSV fetch error:', err);

@@ -144,6 +144,15 @@
     return (arr || []).map(function (s) { return String(s || '').trim(); }).filter(Boolean).join(', ');
   }
 
+  function parseGoogleDriveFolderId(input) {
+    var raw = String(input == null ? '' : input).trim();
+    if (!raw) return '';
+    var m = raw.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (m && m[1]) return m[1];
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(raw)) return raw;
+    return '';
+  }
+
   function uploadProductImage(file, productName, onDone) {
     if (!file) return;
     var fd = new FormData();
@@ -1243,6 +1252,8 @@
         title.textContent = 'Catalog & Orders sources';
         var prodSrc = CTX.products_source === 'google_sheets' ? 'google_sheets' : 'csv';
         var ordSrc = CTX.orders_source === 'google_sheets' ? 'google_sheets' : (CTX.orders_source === 'google_apps_script' ? 'google_apps_script' : 'csv');
+        var assetsSrc = CTX.assets_source === 'google_drive' ? 'google_drive' : 'local';
+        var assetsDriveRoot = (CTX.assets_drive_root_folder_id != null) ? String(CTX.assets_drive_root_folder_id) : '';
         var csvU = (CTX.csv_url != null) ? String(CTX.csv_url) : 'data/products.csv';
         var owh = (CTX.orders_webhook_url != null) ? String(CTX.orders_webhook_url) : '';
         var osh = (CTX.orders_sheet_url != null) ? String(CTX.orders_sheet_url) : '';
@@ -1255,6 +1266,10 @@
           '<div class="form-section"><h3 style="font-size:13px;margin-bottom:8px">Store taglines (optional)</h3>' +
             '<div class="form-group"><label class="form-label">Tagline (EN)</label><input class="form-input" id="se-store-tagline-en" value="' + escInputAttr(CTX.store && CTX.store.tagline_en) + '" /></div>' +
             '<div class="form-group"><label class="form-label">Tagline (BN)</label><input class="form-input" id="se-store-tagline-bn" value="' + escInputAttr(CTX.store && CTX.store.tagline_bn) + '" /></div></div>' +
+          '<div class="form-section"><h3 style="font-size:13px;margin-bottom:8px">Assets (images)</h3>' +
+            '<div class="form-group"><label class="form-label">Source</label><select class="form-select" id="se-assets-source"><option value="local"' + (assetsSrc === 'local' ? ' selected' : '') + '>Local assets folder</option><option value="google_drive"' + (assetsSrc === 'google_drive' ? ' selected' : '') + '>Google Drive folder (read-only)</option></select></div>' +
+            '<div class="form-group"><label class="form-label">Drive root folder ID</label><input class="form-input" id="se-assets-drive-root" value="' + escInputAttr(assetsDriveRoot) + '" placeholder="Google Drive folder ID for assets/" /></div>' +
+            '<p class="form-hint">Server reads assets/* from Drive when enabled. Folder must contain matching subfolders (e.g. products/...)</p></div>' +
           '<div class="form-section"><h3 style="font-size:13px;margin-bottom:8px">Orders</h3>' +
             '<div class="form-group"><label class="form-label">Source</label><select class="form-select" id="se-ord-source"><option value="csv"' + (ordSrc === 'csv' ? ' selected' : '') + '>Local CSV</option><option value="google_sheets"' + (ordSrc === 'google_sheets' ? ' selected' : '') + '>Google Sheet</option><option value="google_apps_script"' + (ordSrc === 'google_apps_script' ? ' selected' : '') + '>Apps Script</option></select></div>' +
             '<div class="form-group"><label class="form-label">Webhook URL</label><input class="form-input" id="se-ord-webhook" value="' + escInputAttr(owh) + '" placeholder="https://…" /></div>' +
@@ -1498,6 +1513,9 @@
         CTX.store.tagline_bn = $('se-store-tagline-bn') ? $('se-store-tagline-bn').value : (CTX.store.tagline_bn || '');
         CTX.products_source = $('se-prod-source') && $('se-prod-source').value === 'google_sheets' ? 'google_sheets' : 'csv';
         CTX.csv_url = $('se-csv-url') ? $('se-csv-url').value.trim() : '';
+        CTX.assets_source = $('se-assets-source') && $('se-assets-source').value === 'google_drive' ? 'google_drive' : 'local';
+        var assetsDriveInput = $('se-assets-drive-root') ? $('se-assets-drive-root').value.trim() : '';
+        CTX.assets_drive_root_folder_id = parseGoogleDriveFolderId(assetsDriveInput) || assetsDriveInput;
         var os = $('se-ord-source') ? $('se-ord-source').value : 'csv';
         CTX.orders_source = os === 'google_sheets' ? 'google_sheets' : (os === 'google_apps_script' ? 'google_apps_script' : 'csv');
         CTX.orders_webhook_url = $('se-ord-webhook') ? $('se-ord-webhook').value.trim() : '';

@@ -1,0 +1,50 @@
+$request_data = array(
+	    'app_key'=>'app_key_value',
+		  'app_secret'=>'app_secret_value’
+	    );	
+$url = curl_init('{base_URL}/checkout/token/grant');
+$request_data_json=json_encode($request_data);
+$header = array(
+		'Content-Type:application/json',
+		'username:sandboxTokenizedUser02,				
+		'password:sandboxTokenizedUser02@12345'
+		);				
+curl_setopt($url,CURLOPT_HTTPHEADER, $header);
+curl_setopt($url,CURLOPT_CUSTOMREQUEST, "POST");
+curl_setopt($url,CURLOPT_RETURNTRANSFER, true);
+curl_setopt($url,CURLOPT_POSTFIELDS, $request_data_json);
+curl_setopt($url,CURLOPT_FOLLOWLOCATION, 1);
+curl_setopt($url, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+
+curl_exec($url);
+curl_close($url);
+
+
+
+curl --request POST \
+  --url https://tokenized.sandbox.bka.sh/v1.2.0-beta/tokenized/checkout/token/grant \
+  --header 'Content-Type: application/json' \
+  --header 'username: sandboxTokenizedUser02' \
+  --header 'password: sandboxTokenizedUser02@12345' \
+  --data '{
+    "app_key": "4f6o0cjiki2rfm34kfdadl1eqq",
+    "app_secret": "2is7hdktrekvrbljjh44ll3d9l1dtjo4pasmjvs5vl5qr3fug4b"
+  }'
+
+
+
+curl --request POST \
+  --url https://tokenized.sandbox.bka.sh/v1.2.0-beta/tokenized/checkout/create \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: application/json' \
+  --header 'Authorization: eyJraWQiOiJvTVJzNU9ZY0wrUnRXQ2o3ZEJtdlc5VDBEcytrckw5M1NzY0VqUzlERXVzPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiJlODNlMDkwMC1jY2ZmLTQzYTctODhiNy0wNjE5NDJkMTVmOTYiLCJhdWQiOiI2cDdhcWVzZmljZTAxazltNWdxZTJhMGlhaCIsImV2ZW50X2lkIjoiZTkxMmE1NjYtYTM5Zi00ZWQ5LWE0ZmMtMzBkMGQ3ZDNiMDQyIiwidG9rZW5fdXNlIjoiaWQiLCJhdXRoX3RpbWUiOjE3NzY2NTI4NTIsImlzcyI6Imh0dHBzOlwvXC9jb2duaXRvLWlkcC5hcC1zb3V0aGVhc3QtMS5hbWF6b25hd3MuY29tXC9hcC1zb3V0aGVhc3QtMV9yYTNuUFkzSlMiLCJjb2duaXRvOnVzZXJuYW1lIjoic2FuZGJveFRva2VuaXplZFVzZXIwMiIsImV4cCI6MTc3NjY1NjQ1MiwiaWF0IjoxNzc2NjUyODUyfQ.czlTW4qjx93NyFvIHPXFzxNTKM9pMxob9ada4Vm37s0E8C3YmyBXSwsdGGMsdm9nOUYOhTDP1W8SG1iq2esvq7sIS6r-iUnxnxT-WoFIMHYD3EXFNULhJTnT9Nzl-FIJjUSLMdNY-X97dLXfPphZChhYwCfYSjs-K7SpUyl-qM7iZ1Qgdcxl7sVWMpA1BvUrApo6qpXmD2KYV_yaM0-Ifcsv6Q8PZ-EIitovqwr6HEu3AphDchqjrMLXlgYMsf6alH8bR4htp7dttG0jUA0ztb8Q18ptZ05WyPHZbMm5NXc4qkGkEBT9hoKvRO3Lgzp-74oOI07srbeAjzMGxlzsRA' \
+  --header 'X-APP-Key: 4f6o0cjiki2rfm34kfdadl1eqq' \
+  --data '{
+    "mode": "0011",
+    "payerReference": "01770618575",
+    "callbackURL": "jossfinds.onrender.com",
+    "amount": "100",
+    "currency": "BDT",
+    "intent": "sale",
+    "merchantInvoiceNumber": "INV-202404200001"
+  }'

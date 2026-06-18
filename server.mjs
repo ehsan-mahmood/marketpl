@@ -9,6 +9,7 @@ import { promises as fsp } from 'fs';
 import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
+import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 
@@ -57,6 +58,8 @@ const MIME = {
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
 };
+
+const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 function normPhone(s) {
   return String(s || '').replace(/\D/g, '');
@@ -532,6 +535,26 @@ function readContextJson() {
   }
 }
 
+function assetsSourceMode(ctx) {
+  return ctx && ctx.assets_source === 'google_drive' ? 'google_drive' : 'local';
+}
+
+function parseGoogleDriveFolderId(input) {
+  const raw = String(input == null ? '' : input).trim();
+  if (!raw) return '';
+  const m = raw.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (m && m[1]) return m[1];
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(raw)) return raw;
+  return '';
+}
+
+function getAssetsDriveRootFolderId(ctx) {
+  const raw = ctx && ctx.assets_drive_root_folder_id != null
+    ? String(ctx.assets_drive_root_folder_id).trim()
+    : '';
+  return parseGoogleDriveFolderId(raw);
+}
+
 /** @returns {'csv' | 'google_sheets'} */
 function productsSourceMode(ctx) {
   return ctx && ctx.products_source === 'google_sheets' ? 'google_sheets' : 'csv';
@@ -942,6 +965,407 @@ function getSheetsClient() {
     sheetsApiSingleton = google.sheets({ version: 'v4', auth });
   }
   return sheetsApiSingleton;
+}
+
+let driveApiSingleton = null;
+function getDriveClient() {
+  if (!driveApiSingleton) {
+    const credPath = googleCredentialsPath();
+    if (!fs.existsSync(credPath)) {
+      throw new Error(
+        'Google Drive assets: missing credentials. Add google-service-account.json in the project root, or set MARKETPL_GOOGLE_CREDENTIALS to the file path. Share the Drive folder with the service account client_email.'
+      );
+    }
+    const auth = new google.auth.GoogleAuth({
+      keyFile: credPath,
+      scopes: ['https://www.googleapis.com/auth/drive']
+    });
+    driveApiSingleton = google.drive({ version: 'v3', auth });
+  }
+  return driveApiSingleton;
+}
+
+function driveQueryEscape(value) {
+  return String(value == null ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
+}
+
+function safeAssetPathSegmentsFromWebPath(webPath) {
+  const rel = normalizeWebPath(webPath);
+  if (!rel || !rel.toLowerCase().startsWith('assets/')) return null;
+  const segs = rel.split('/').filter(Boolean);
+  if (!segs.length) return null;
+  for (let i = 0; i < segs.length; i++) {
+    const s = String(segs[i] || '').trim();
+    if (!s || s === '.' || s === '..') return null;
+  }
+  return segs;
+}
+
+function safeAssetDirectoryFromInput(input) {
+  var rel = normalizeWebPath(input || '');
+  if (!rel || !/^assets\//i.test(rel)) return '';
+  const parts = rel.split('/').filter(Boolean);
+  if (!parts.length) return '';
+  for (let i = 0; i < parts.length; i++) {
+    const s = String(parts[i] || '').trim();
+    if (!s || s === '.' || s === '..') return '';
+  }
+  return parts.join('/');
+}
+
+const ASSET_LIST_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);
+const DRIVE_ASSET_INDEX_TTL_MS = 5 * 60 * 1000;
+const DRIVE_FILE_CACHE_TTL_MS = 10 * 60 * 1000;
+let driveAssetIndexState = {
+  rootFolderId: '',
+  builtAt: 0,
+  byPath: new Map(),
+  dirFiles: new Map(),
+  inflight: null
+};
+let driveFileContentCache = new Map();
+
+function normalizeWebAssetPathForIndex(input) {
+  return normalizeWebPath(String(input || '').trim());
+}
+
+function toWebAssetPathFromRootRelative(rootRelativePath) {
+  const rel = normalizeWebAssetPathForIndex(rootRelativePath);
+  if (!rel) return '';
+  if (/^assets\//i.test(rel)) return rel;
+  return normalizeWebAssetPathForIndex(path.posix.join('assets', rel));
+}
+
+function invalidateDriveAssetCaches() {
+  driveAssetIndexState = {
+    rootFolderId: '',
+    builtAt: 0,
+    byPath: new Map(),
+    dirFiles: new Map(),
+    inflight: null
+  };
+  driveFileContentCache = new Map();
+}
+
+async function driveListChildren(folderId) {
+  const drive = getDriveClient();
+  const out = [];
+  let pageToken = undefined;
+  do {
+    const r = await drive.files.list({
+      q: [
+        `'${driveQueryEscape(folderId)}' in parents`,
+        'trashed=false'
+      ].join(' and '),
+      fields: 'nextPageToken, files(id,name,mimeType)',
+      pageSize: 1000,
+      pageToken: pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true
+    });
+    const files = r && r.data && Array.isArray(r.data.files) ? r.data.files : [];
+    files.forEach(function (f) { out.push(f); });
+    pageToken = r && r.data ? r.data.nextPageToken : undefined;
+  } while (pageToken);
+  return out;
+}
+
+async function ensureDriveChildFolder(parentId, folderName) {
+  const name = String(folderName || '').trim();
+  if (!name) throw new Error('Folder name is required');
+  const existing = await driveFindChildByName(parentId, name, true);
+  if (existing && existing.id) return String(existing.id);
+  const drive = getDriveClient();
+  const created = await drive.files.create({
+    requestBody: {
+      name: name,
+      mimeType: DRIVE_FOLDER_MIME,
+      parents: [String(parentId)]
+    },
+    fields: 'id',
+    supportsAllDrives: true
+  });
+  const id = created && created.data && created.data.id ? String(created.data.id) : '';
+  if (!id) throw new Error('Could not create Drive folder: ' + name);
+  return id;
+}
+
+async function ensureDriveFolderPath(rootFolderId, parts) {
+  let parentId = String(rootFolderId || '').trim();
+  if (!parentId) throw new Error('Drive root folder is not configured');
+  for (let i = 0; i < parts.length; i++) {
+    const p = String(parts[i] || '').trim();
+    if (!p) continue;
+    parentId = await ensureDriveChildFolder(parentId, p);
+  }
+  return parentId;
+}
+
+async function ensureDriveProductUploadFolder(rootFolderId, productFolderName) {
+  const rootId = String(rootFolderId || '').trim();
+  if (!rootId) throw new Error('Drive root folder is not configured');
+  const assetsChild = await driveFindChildByName(rootId, 'assets', true);
+  const assetsRootId = assetsChild && assetsChild.id ? String(assetsChild.id) : rootId;
+  return await ensureDriveFolderPath(assetsRootId, ['products', String(productFolderName || '').trim()]);
+}
+
+async function uploadBufferToDriveFolder(parentFolderId, filename, mimeType, buffer) {
+  const drive = getDriveClient();
+  const created = await drive.files.create({
+    requestBody: {
+      name: String(filename || 'upload.bin'),
+      parents: [String(parentFolderId)]
+    },
+    media: {
+      mimeType: String(mimeType || 'application/octet-stream'),
+      body: Readable.from(buffer)
+    },
+    fields: 'id,name,mimeType',
+    supportsAllDrives: true
+  });
+  return created && created.data ? created.data : null;
+}
+
+async function rebuildDriveAssetIndex(rootFolderId) {
+  const byPath = new Map();
+  const dirFiles = new Map();
+  const queue = [{ folderId: String(rootFolderId), rel: '' }];
+  while (queue.length) {
+    const cur = queue.shift();
+    const children = await driveListChildren(cur.folderId);
+    for (let i = 0; i < children.length; i++) {
+      const c = children[i] || {};
+      const childId = c.id != null ? String(c.id) : '';
+      const childName = c.name != null ? String(c.name).trim() : '';
+      const childMime = c.mimeType != null ? String(c.mimeType) : '';
+      if (!childId || !childName) continue;
+      const childRel = cur.rel ? (cur.rel + '/' + childName) : childName;
+      if (childMime === DRIVE_FOLDER_MIME) {
+        queue.push({ folderId: childId, rel: childRel });
+        continue;
+      }
+      const ext = path.extname(childName).toLowerCase();
+      if (!ASSET_LIST_EXT.has(ext)) continue;
+      const webPath = toWebAssetPathFromRootRelative(childRel);
+      if (!webPath) continue;
+      byPath.set(webPath, { id: childId, name: childName, mimeType: childMime });
+      const dir = webPath.split('/').slice(0, -1).join('/');
+      if (!dirFiles.has(dir)) dirFiles.set(dir, []);
+      dirFiles.get(dir).push('/' + webPath);
+    }
+  }
+  dirFiles.forEach(function (arr) {
+    arr.sort(function (a, b) {
+      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+    });
+  });
+  return { byPath, dirFiles, builtAt: Date.now() };
+}
+
+async function ensureDriveAssetIndexFresh(ctx, force) {
+  if (assetsSourceMode(ctx) !== 'google_drive') {
+    invalidateDriveAssetCaches();
+    return driveAssetIndexState;
+  }
+  const rootFolderId = getAssetsDriveRootFolderId(ctx);
+  if (!rootFolderId) {
+    invalidateDriveAssetCaches();
+    return driveAssetIndexState;
+  }
+  if (driveAssetIndexState.rootFolderId !== rootFolderId) {
+    driveAssetIndexState.rootFolderId = rootFolderId;
+    driveAssetIndexState.builtAt = 0;
+    driveAssetIndexState.byPath = new Map();
+    driveAssetIndexState.dirFiles = new Map();
+    driveAssetIndexState.inflight = null;
+    driveFileContentCache = new Map();
+  }
+  const now = Date.now();
+  const fresh = (now - driveAssetIndexState.builtAt) < DRIVE_ASSET_INDEX_TTL_MS;
+  if (!force && fresh && driveAssetIndexState.byPath.size) return driveAssetIndexState;
+  if (driveAssetIndexState.inflight) return driveAssetIndexState.inflight;
+  driveAssetIndexState.inflight = rebuildDriveAssetIndex(rootFolderId)
+    .then(function (rebuilt) {
+      driveAssetIndexState.byPath = rebuilt.byPath;
+      driveAssetIndexState.dirFiles = rebuilt.dirFiles;
+      driveAssetIndexState.builtAt = rebuilt.builtAt;
+      driveAssetIndexState.inflight = null;
+      return driveAssetIndexState;
+    })
+    .catch(function (e) {
+      driveAssetIndexState.inflight = null;
+      throw e;
+    });
+  return driveAssetIndexState.inflight;
+}
+
+async function driveFindChildByName(parentId, name, wantFolder) {
+  const drive = getDriveClient();
+  const qParts = [
+    `'${driveQueryEscape(parentId)}' in parents`,
+    `name='${driveQueryEscape(name)}'`,
+    'trashed=false'
+  ];
+  if (wantFolder) qParts.push(`mimeType='${DRIVE_FOLDER_MIME}'`);
+  else qParts.push(`mimeType!='${DRIVE_FOLDER_MIME}'`);
+  const r = await drive.files.list({
+    q: qParts.join(' and '),
+    fields: 'files(id,name,mimeType)',
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
+  });
+  const files = r && r.data && Array.isArray(r.data.files) ? r.data.files : [];
+  return files.length ? files[0] : null;
+}
+
+async function resolveDriveAssetFileBySegments(rootFolderId, segs) {
+  if (!rootFolderId || !Array.isArray(segs) || segs.length < 2) return null;
+  let parentId = rootFolderId;
+  for (let i = 0; i < segs.length - 1; i++) {
+    const child = await driveFindChildByName(parentId, segs[i], true);
+    if (!child || !child.id) return null;
+    parentId = String(child.id);
+  }
+  const leafName = segs[segs.length - 1];
+  const file = await driveFindChildByName(parentId, leafName, false);
+  if (!file || !file.id) return null;
+  return file;
+}
+
+async function resolveDriveFolderBySegments(rootFolderId, segs) {
+  if (!rootFolderId || !Array.isArray(segs) || !segs.length) return null;
+  let parentId = rootFolderId;
+  for (let i = 0; i < segs.length; i++) {
+    const child = await driveFindChildByName(parentId, segs[i], true);
+    if (!child || !child.id) return null;
+    parentId = String(child.id);
+  }
+  return parentId;
+}
+
+async function fetchDriveFileBuffer(fileId) {
+  const drive = getDriveClient();
+  const r = await drive.files.get(
+    { fileId: String(fileId), alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' }
+  );
+  return Buffer.from(r && r.data ? r.data : []);
+}
+
+async function fetchDriveFileBufferCached(fileId) {
+  const k = String(fileId || '').trim();
+  if (!k) return Buffer.from([]);
+  const now = Date.now();
+  const hit = driveFileContentCache.get(k);
+  if (hit && hit.expiresAt > now && hit.buffer) return hit.buffer;
+  const buf = await fetchDriveFileBuffer(k);
+  driveFileContentCache.set(k, { buffer: buf, expiresAt: now + DRIVE_FILE_CACHE_TTL_MS });
+  return buf;
+}
+
+async function tryServeDriveAsset(pathname, res) {
+  const ctx = readContextJson();
+  if (assetsSourceMode(ctx) !== 'google_drive') return false;
+  const rootFolderId = getAssetsDriveRootFolderId(ctx);
+  if (!rootFolderId) return false;
+  const segs = safeAssetPathSegmentsFromWebPath(pathname);
+  if (!segs || segs.length < 2) return false;
+  const webPath = normalizeWebAssetPathForIndex(pathname);
+
+  try {
+    const idx = await ensureDriveAssetIndexFresh(ctx, false);
+    const hit = idx.byPath.get(webPath);
+    if (hit && hit.id) {
+      const data = await fetchDriveFileBufferCached(hit.id);
+      const ext = path.extname(String(hit.name || webPath)).toLowerCase();
+      const contentType =
+        MIME[ext] ||
+        (hit.mimeType && String(hit.mimeType).trim()) ||
+        'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=300' });
+      res.end(data);
+      return true;
+    }
+  } catch (_) {
+    // Fallback to direct path resolution below.
+  }
+
+  // Support either root=assets folder or root=project root that contains assets/.
+  const variants = [segs];
+  if (segs[0].toLowerCase() === 'assets' && segs.length >= 2) {
+    variants.push(segs.slice(1));
+  }
+  let found = null;
+  for (let i = 0; i < variants.length; i++) {
+    found = await resolveDriveAssetFileBySegments(rootFolderId, variants[i]);
+    if (found) break;
+  }
+  if (!found) return false;
+
+  const data = await fetchDriveFileBufferCached(found.id);
+  const ext = path.extname(String(found.name || '')).toLowerCase();
+  const contentType =
+    MIME[ext] ||
+    (found.mimeType && String(found.mimeType).trim()) ||
+    'application/octet-stream';
+  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=300' });
+  res.end(data);
+  return true;
+}
+
+async function listDriveAssetFilesByDir(webDir) {
+  const ctx = readContextJson();
+  if (assetsSourceMode(ctx) !== 'google_drive') return [];
+  const rootFolderId = getAssetsDriveRootFolderId(ctx);
+  if (!rootFolderId) return [];
+  const cleanDir = safeAssetDirectoryFromInput(webDir);
+  if (!cleanDir) return [];
+
+  try {
+    const idx = await ensureDriveAssetIndexFresh(ctx, false);
+    const fromIndex = idx.dirFiles.get(cleanDir);
+    if (fromIndex && fromIndex.length) return fromIndex.slice();
+  } catch (_) {
+    // Continue with direct listing fallback.
+  }
+
+  const segs = cleanDir.split('/').filter(Boolean);
+  if (!segs.length) return [];
+
+  const variants = [segs];
+  if (segs[0].toLowerCase() === 'assets' && segs.length >= 2) {
+    variants.push(segs.slice(1));
+  }
+  let folderId = null;
+  for (let i = 0; i < variants.length; i++) {
+    folderId = await resolveDriveFolderBySegments(rootFolderId, variants[i]);
+    if (folderId) break;
+  }
+  if (!folderId) return [];
+
+  const drive = getDriveClient();
+  const q = [
+    `'${driveQueryEscape(folderId)}' in parents`,
+    `mimeType!='${DRIVE_FOLDER_MIME}'`,
+    'trashed=false'
+  ].join(' and ');
+  const r = await drive.files.list({
+    q: q,
+    fields: 'files(id,name,mimeType)',
+    pageSize: 200,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
+  });
+  const files = r && r.data && Array.isArray(r.data.files) ? r.data.files : [];
+  return files
+    .map(function (f) { return String((f && f.name) || '').trim(); })
+    .filter(Boolean)
+    .filter(function (name) { return ASSET_LIST_EXT.has(path.extname(name).toLowerCase()); })
+    .sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }); })
+    .map(function (name) { return '/' + cleanDir + '/' + name; });
 }
 
 async function readOrderRowsFromSheets(cfg) {
@@ -1722,6 +2146,36 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'GET' && pathname === '/api/assets-list') {
+    try {
+      const dirRaw = String(u.searchParams.get('dir') || '').trim();
+      const cleanDir = safeAssetDirectoryFromInput(dirRaw);
+      if (!cleanDir) {
+        return json(res, 400, { ok: false, error: 'dir must be an assets/* directory path' });
+      }
+      const ctx = readContextJson();
+      if (assetsSourceMode(ctx) === 'google_drive') {
+        const urls = await listDriveAssetFilesByDir(cleanDir);
+        return json(res, 200, { ok: true, dir: cleanDir, urls: urls });
+      }
+      const abs = safeFilePath('/' + cleanDir + '/');
+      if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) {
+        return json(res, 200, { ok: true, dir: cleanDir, urls: [] });
+      }
+      const entries = fs.readdirSync(abs, { withFileTypes: true });
+      const names = entries
+        .filter(function (d) { return d && d.isFile && d.isFile(); })
+        .map(function (d) { return String(d.name || '').trim(); })
+        .filter(Boolean)
+        .filter(function (name) { return ASSET_LIST_EXT.has(path.extname(name).toLowerCase()); })
+        .sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }); });
+      const urls = names.map(function (name) { return '/' + cleanDir + '/' + name; });
+      return json(res, 200, { ok: true, dir: cleanDir, urls: urls });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: String(e && e.message ? e.message : e) });
+    }
+  }
+
   /* ── Protected saves ── */
   if (req.method === 'POST' && pathname === '/api/save-context') {
     if (!requireAdmin(req, res)) return;
@@ -1729,6 +2183,7 @@ const server = http.createServer(async (req, res) => {
       const raw = await readBody(req);
       const obj = JSON.parse(raw);
       await writeFileResilient(CONTEXT_PATH, JSON.stringify(obj, null, 2) + '\n');
+      invalidateDriveAssetCaches();
       syncAuthPhoneFromSavedContext(res, obj);
       return json(res, 200, { ok: true });
     } catch (e) {
@@ -1812,6 +2267,22 @@ const server = http.createServer(async (req, res) => {
         .slice(0, 60);
       const stamp = Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
       const outName = (base || 'product') + '-' + stamp + ext;
+      const ctx = readContextJson();
+      if (assetsSourceMode(ctx) === 'google_drive') {
+        const rootFolderId = getAssetsDriveRootFolderId(ctx);
+        if (!rootFolderId) {
+          return json(res, 400, {
+            ok: false,
+            error: 'Google Drive assets is enabled, but assets_drive_root_folder_id is not set.'
+          });
+        }
+        const targetFolderId = await ensureDriveProductUploadFolder(rootFolderId, productFolder);
+        await uploadBufferToDriveFolder(targetFolderId, outName, parsed.mime, parsed.buffer);
+        invalidateDriveAssetCaches();
+        const rel = normalizeWebPath(path.posix.join('assets', 'products', productFolder, outName));
+        return json(res, 200, { ok: true, path: rel });
+      }
+
       ensureDataDirs();
       const targetDir = path.join(PRODUCTS_UPLOAD_DIR, productFolder);
       if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
@@ -1841,6 +2312,15 @@ const server = http.createServer(async (req, res) => {
     filePathname = pageAlias[filePathname];
   }
   if (filePathname === '/') filePathname = '/shop-showroom.html';
+
+  if (req.method === 'GET' && filePathname.toLowerCase().startsWith('/assets/')) {
+    try {
+      const served = await tryServeDriveAsset(filePathname, res);
+      if (served) return;
+    } catch (_) {
+      // Fallback to local assets if Drive read fails.
+    }
+  }
 
   const filePath = safeFilePath(filePathname);
   if (!filePath) {
